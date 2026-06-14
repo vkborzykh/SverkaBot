@@ -93,6 +93,8 @@ export const msg = {
   deleteCancel: 'Отмена',
   deleteSuccess:
     'Все ваши данные удалены. Если захотите пользоваться сервисом снова, отправьте /start.',
+  deleteCancelled: 'Удаление отменено.',
+  deleteError: 'Произошла ошибка при удалении данных. Попробуйте позже.',
 
   // ── Upload shared ─────────────────────────────────────────────────────────────
   uploadDuplicateImport: (importId: string) =>

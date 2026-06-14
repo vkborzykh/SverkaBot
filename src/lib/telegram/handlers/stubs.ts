@@ -32,7 +32,3 @@ export async function handleStatus(ctx: Context): Promise<void> {
 export async function handleSyncStatus(ctx: Context): Promise<void> {
   await ctx.reply('Введите ID сверки: /sync_status <id>');
 }
-
-export async function handleDeleteMyData(ctx: Context): Promise<void> {
-  await ctx.reply(msg.deleteConfirmPrompt);
-}

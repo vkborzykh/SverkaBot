@@ -16,8 +16,8 @@ import {
   handleHelp,
   handleGetReport,
   handleStatus,
-  handleDeleteMyData,
 } from './handlers/stubs';
+import { handleDeleteMyData, handleDeleteConfirm, handleDeleteCancel } from './handlers/deleteData';
 import { handleSubscribe } from './handlers/subscribe';
 import { handleRunSync } from './handlers/runSync';
 import { handleSyncStatus } from './handlers/syncStatus';
@@ -219,6 +219,12 @@ export async function routeUpdate(
         break;
       case 'consent:decline':
         await handleConsentDecline(ctx as Parameters<typeof handleConsentDecline>[0]);
+        break;
+      case 'delete:confirm':
+        await handleDeleteConfirm(ctx as Parameters<typeof handleDeleteConfirm>[0]);
+        break;
+      case 'delete:cancel':
+        await handleDeleteCancel(ctx as Parameters<typeof handleDeleteCancel>[0]);
         break;
     }
   }

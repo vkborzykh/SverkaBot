@@ -1,4 +1,4 @@
-import { writeFile, mkdir } from 'fs/promises';
+import { writeFile, mkdir, unlink, rm } from 'fs/promises';
 import { join } from 'path';
 
 // In production this would be replaced with S3-compatible / Bolt Storage.
@@ -41,4 +41,22 @@ export async function storeReport(
 
 export function getStorageFilePath(storagePath: string): string {
   return join(UPLOADS_DIR, storagePath);
+}
+
+export async function deleteFile(storagePath: string): Promise<void> {
+  if (process.env.NODE_ENV === 'test') return;
+  try {
+    await unlink(join(UPLOADS_DIR, storagePath));
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+}
+
+export async function deleteDirectory(storagePath: string): Promise<void> {
+  if (process.env.NODE_ENV === 'test') return;
+  try {
+    await rm(join(UPLOADS_DIR, storagePath), { recursive: true, force: true });
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
 }
