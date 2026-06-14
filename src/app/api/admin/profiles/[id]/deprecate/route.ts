@@ -1,0 +1,14 @@
+import { NextRequest } from 'next/server';
+import { requireAdminToken } from '@/src/lib/guards';
+import { okResponse } from '@/src/lib/http';
+
+export async function POST(
+  req: NextRequest,
+  { params }: { params: { id: string } },
+) {
+  const guard = requireAdminToken(req);
+  if (guard) return guard;
+
+  // TODO: set profile status to DEPRECATED for params.id, record audit event
+  return okResponse({ id: params.id, status: 'DEPRECATED' });
+}
