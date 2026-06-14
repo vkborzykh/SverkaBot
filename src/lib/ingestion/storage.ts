@@ -23,3 +23,22 @@ export async function storeFile(
 
   return storagePath;
 }
+
+export async function storeReport(
+  runId: string,
+  buffer: Buffer,
+): Promise<string> {
+  const storagePath = `reports/${runId}/report.zip`;
+
+  if (process.env.NODE_ENV !== 'test') {
+    const dir = join(UPLOADS_DIR, 'reports', runId);
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'report.zip'), buffer);
+  }
+
+  return storagePath;
+}
+
+export function getStorageFilePath(storagePath: string): string {
+  return join(UPLOADS_DIR, storagePath);
+}
