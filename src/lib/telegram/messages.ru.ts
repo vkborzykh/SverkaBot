@@ -104,4 +104,21 @@ export const msg = {
 
   // ── Admin ──────────────────────────────────────────────────────────────────────
   adminNotAuthorized: 'Нет доступа.',
+  adminProfilesHeader: '📋 Профили банковских выписок:',
+  adminProfileRow: (id: string, name: string, status: string, usage: number, rate: string) =>
+    `• ${name} [${status}] — использований: ${usage}, точность: ${rate}%\n  ID: ${id}`,
+  adminNoProfiles: 'Профили не найдены.',
+  adminProfileActivated: (id: string) => `Профиль ${id} активирован.`,
+  adminProfileDeprecated: (id: string) => `Профиль ${id} помечен как устаревший.`,
+  adminProfileNotFound: 'Профиль не найден.',
+  adminProfileMissingId: 'Укажите ID профиля: /activate_profile <id>',
+  adminStatsHeader: '📊 Статистика системы:',
+  adminErrorsHeader: '⚠️ Последние ошибки парсинга:',
+  adminErrorRow: (importId: string, row: number, code: string, message: string) =>
+    `• Импорт ${importId.slice(0, 8)}..., строка ${row}: [${code}] ${message}`,
+  adminNoErrors: 'Ошибок парсинга за последние 30 дней не найдено.',
+  adminRetryQueued: (runId: string, jobId: string) =>
+    `Повторная генерация отчёта поставлена в очередь.\nСверка: ${runId}\nЗадача: ${jobId}`,
+  adminRetryMissingId: 'Укажите ID сверки: /retry_export <run_id>',
+  adminRunNotFound: 'Сверка не найдена.',
 } as const;

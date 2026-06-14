@@ -5,10 +5,12 @@ export type AuditEventType =
   | 'trial_started'
   | 'subscription_activated'
   | 'subscription_expired'
-  | 'data_deleted';
+  | 'data_deleted'
+  | 'profile_activated'
+  | 'profile_deprecated';
 
 export async function logAuditEvent(
-  userId: string,
+  userId: string | null,
   eventType: AuditEventType,
   meta?: Record<string, unknown>,
 ): Promise<void> {

@@ -1,6 +1,8 @@
 import { NextRequest } from 'next/server';
 import { requireAdminToken } from '@/src/lib/guards';
-import { okResponse } from '@/src/lib/http';
+import { okResponse, errResponse } from '@/src/lib/http';
+import { findProfileById, updateProfile } from '@/src/db/repositories/statement-profiles';
+import { logAuditEvent } from '@/src/lib/audit/audit';
 
 export async function POST(
   req: NextRequest,
@@ -9,6 +11,17 @@ export async function POST(
   const guard = requireAdminToken(req);
   if (guard) return guard;
 
-  // TODO: set profile status to ACTIVE for params.id, record audit event
-  return okResponse({ id: params.id, status: 'ACTIVE' });
+  const profile = await findProfileById(params.id);
+  if (!profile) {
+    return errResponse('PROFILE_NOT_FOUND', 'Profile not found', 404);
+  }
+
+  const updated = await updateProfile(params.id, { status: 'ACTIVE' });
+
+  await logAuditEvent(null, 'profile_activated', {
+    profile_id: params.id,
+    previous_status: profile.status,
+  });
+
+  return okResponse({ id: params.id, status: updated?.status ?? 'ACTIVE' });
 }

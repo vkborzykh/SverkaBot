@@ -21,6 +21,15 @@ import {
 import { handleSubscribe } from './handlers/subscribe';
 import { handleRunSync } from './handlers/runSync';
 import { handleSyncStatus } from './handlers/syncStatus';
+import {
+  isAdmin,
+  handleViewProfiles,
+  handleActivateProfile,
+  handleDeprecateProfile,
+  handleViewErrors,
+  handleStats,
+  handleRetryExport,
+} from './handlers/admin';
 import { msg } from './messages.ru';
 
 // Minimal context shape for our handlers — avoids importing full Telegraf in the route
@@ -108,6 +117,44 @@ export async function routeUpdate(
 
     if (command === 'start') {
       await handleStart(ctx as Parameters<typeof handleStart>[0]);
+      return;
+    }
+
+    // Admin commands — only for users in TELEGRAM_ADMIN_IDS
+    const ADMIN_COMMANDS = new Set([
+      'view_profiles',
+      'activate_profile',
+      'deprecate_profile',
+      'view_errors',
+      'stats',
+      'retry_export',
+    ]);
+
+    if (ADMIN_COMMANDS.has(command)) {
+      if (!isAdmin(telegramId)) {
+        await ctx.reply(msg.adminNotAuthorized);
+        return;
+      }
+      switch (command) {
+        case 'view_profiles':
+          await handleViewProfiles(ctx as Parameters<typeof handleViewProfiles>[0]);
+          break;
+        case 'activate_profile':
+          await handleActivateProfile(ctx as Parameters<typeof handleActivateProfile>[0]);
+          break;
+        case 'deprecate_profile':
+          await handleDeprecateProfile(ctx as Parameters<typeof handleDeprecateProfile>[0]);
+          break;
+        case 'view_errors':
+          await handleViewErrors(ctx as Parameters<typeof handleViewErrors>[0]);
+          break;
+        case 'stats':
+          await handleStats(ctx as Parameters<typeof handleStats>[0]);
+          break;
+        case 'retry_export':
+          await handleRetryExport(ctx as Parameters<typeof handleRetryExport>[0]);
+          break;
+      }
       return;
     }
 
