@@ -5,7 +5,7 @@ import type { BotContext } from '@/src/lib/telegram/router';
 
 function formatAmount(kopeks: bigint | string | null | undefined): string {
   if (kopeks === null || kopeks === undefined) return '0.00';
-  const n = typeof kopeks === 'bigint' ? Number(kopeks) : parseFloat(String(kopeks));
+  const n = Number(kopeks);
   return (n / 100).toFixed(2);
 }
 
@@ -19,7 +19,7 @@ export async function handleSyncStatus(ctx: BotContext): Promise<void> {
   const runId = parts[1] ?? null;
 
   if (!runId) {
-    await ctx.reply('Укажите ID сверки: /sync_status <id>');
+    await ctx.reply(msg.syncStatusMissingId);
     return;
   }
 
@@ -32,16 +32,16 @@ export async function handleSyncStatus(ctx: BotContext): Promise<void> {
 
   const run = await findRunById(runId);
   if (!run || run.user_id !== user.id) {
-    await ctx.reply('Сверка не найдена или не принадлежит вашему аккаунту.');
+    await ctx.reply(msg.syncStatusNotFound);
     return;
   }
 
   switch (run.status) {
     case 'PENDING':
-      await ctx.reply(`⏳ Сверка ${runId} ожидает обработки.`);
+      await ctx.reply(msg.syncStatusPending(runId));
       break;
     case 'RUNNING':
-      await ctx.reply(`🔄 Сверка ${runId} выполняется. Пожалуйста, подождите.`);
+      await ctx.reply(msg.syncStatusRunning(runId));
       break;
     case 'COMPLETED': {
       const matchedCount = run.matched_count ?? 0;
@@ -53,17 +53,15 @@ export async function handleSyncStatus(ctx: BotContext): Promise<void> {
       );
       if (run.ambiguous_amount && BigInt(run.ambiguous_amount) > BigInt(0)) {
         const ambiguousRub = formatAmount(run.ambiguous_amount);
-        await ctx.reply(`⚠️ Неоднозначных транзакций на сумму ${ambiguousRub} ₽. Рекомендуем проверить вручную.`);
+        await ctx.reply(msg.syncStatusAmbiguousWarning(ambiguousRub));
       }
-      await ctx.reply(`Для скачивания отчёта: /get_report ${runId}`);
+      await ctx.reply(msg.syncStatusDownloadReport(runId));
       break;
     }
     case 'FAILED':
-      await ctx.reply(
-        `❌ Сверка завершилась с ошибкой. ID: ${runId}. Попробуйте запустить сверку снова или обратитесь в поддержку.`,
-      );
+      await ctx.reply(msg.syncStatusFailed(runId));
       break;
     default:
-      await ctx.reply(`Статус сверки: ${run.status}`);
+      await ctx.reply(msg.syncStatusUnknown(run.status ?? ''));
   }
 }

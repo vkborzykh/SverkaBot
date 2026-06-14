@@ -86,6 +86,32 @@ export const msg = {
   subscribeReminderInactivity:
     'Давно не сверяли выплаты? Загрузите свежие отчёты и проверьте, все ли средства поступили.',
 
+  // ── Sync status command ───────────────────────────────────────────────────────
+  syncStatusMissingId: 'Укажите ID сверки: /sync_status <id>',
+  syncStatusNotFound: 'Сверка не найдена или не принадлежит вашему аккаунту.',
+  syncStatusPending: (runId: string) => `⏳ Сверка ${runId} ожидает обработки.`,
+  syncStatusRunning: (runId: string) => `🔄 Сверка ${runId} выполняется. Пожалуйста, подождите.`,
+  syncStatusAmbiguousWarning: (amountRub: string) =>
+    `⚠️ Неоднозначных транзакций на сумму ${amountRub} ₽. Рекомендуем проверить вручную.`,
+  syncStatusDownloadReport: (runId: string) => `Для скачивания отчёта: /get_report ${runId}`,
+  syncStatusFailed: (runId: string) =>
+    `❌ Сверка завершилась с ошибкой. ID: ${runId}. Попробуйте запустить сверку снова или обратитесь в поддержку.`,
+  syncStatusUnknown: (status: string) => `Статус сверки: ${status}`,
+
+  // ── Help command ──────────────────────────────────────────────────────────────
+  helpText:
+    '/upload_wb — загрузить отчёт WB\n' +
+    '/upload_bank — загрузить выписку банка\n' +
+    '/run_sync — запустить сверку\n' +
+    '/history — история сверок\n' +
+    '/subscribe — управление подпиской\n' +
+    '/loss_calculator — оценить возможные потери\n' +
+    '/delete_my_data — удалить мои данные',
+
+  // ── Import / sync status stubs ─────────────────────────────────────────────────
+  importStatusMissingId: 'Введите ID импорта: /status <id>',
+  syncStatusMissingIdShort: 'Введите ID сверки: /sync_status <id>',
+
   // ── Delete data ───────────────────────────────────────────────────────────────
   deleteConfirmPrompt:
     'Вы действительно хотите удалить все свои данные — файлы, импорты и сверки? Это действие необратимо.',
