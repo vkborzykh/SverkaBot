@@ -1,13 +1,36 @@
-// Billing / subscription stubs.
-// Implements section 9 of Tech Plan v4.2.
+import { updateUser, findUserById } from '@/src/db/repositories/users';
 
 export async function activateSubscription(
-  _userId: string,
-  _durationDays: number,
-): Promise<void> {
-  throw new Error('Not implemented');
+  userId: string,
+  durationDays: number,
+): Promise<Date> {
+  const user = await findUserById(userId);
+  if (!user) throw new Error(`User not found: ${userId}`);
+
+  const now = new Date();
+  let baseDate = now;
+
+  // If user already has active subscription, extend from current end date
+  if (
+    user.subscription_status === 'ACTIVE' &&
+    user.subscription_end_date &&
+    user.subscription_end_date > now
+  ) {
+    baseDate = user.subscription_end_date;
+  }
+
+  const endDate = new Date(baseDate.getTime() + durationDays * 24 * 60 * 60 * 1000);
+
+  await updateUser(userId, {
+    subscription_status: 'ACTIVE',
+    subscription_end_date: endDate,
+  });
+
+  return endDate;
 }
 
-export async function expireSubscription(_userId: string): Promise<void> {
-  throw new Error('Not implemented');
+export async function expireSubscription(userId: string): Promise<void> {
+  await updateUser(userId, {
+    subscription_status: 'EXPIRED',
+  });
 }

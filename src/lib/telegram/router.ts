@@ -13,12 +13,12 @@ import {
 } from './handlers/upload';
 import {
   handleHistory,
-  handleSubscribe,
   handleHelp,
   handleGetReport,
   handleStatus,
   handleDeleteMyData,
 } from './handlers/stubs';
+import { handleSubscribe } from './handlers/subscribe';
 import { handleRunSync } from './handlers/runSync';
 import { handleSyncStatus } from './handlers/syncStatus';
 import { msg } from './messages.ru';

@@ -9,10 +9,6 @@ export async function handleHistory(ctx: Context): Promise<void> {
   await ctx.reply(msg.historyHeader);
 }
 
-export async function handleSubscribe(ctx: Context): Promise<void> {
-  await ctx.reply(msg.subscribeExpiredStatus('#'));
-}
-
 export async function handleHelp(ctx: Context): Promise<void> {
   await ctx.reply(
     '/upload_wb — загрузить отчёт WB\n' +

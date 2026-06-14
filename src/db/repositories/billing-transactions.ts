@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
 import { getDb } from '../index';
 import { billing_transactions } from '../schema';
@@ -35,5 +35,34 @@ export async function updateBillingTransaction(
     .set(data)
     .where(eq(billing_transactions.id, id))
     .returning();
+  return rows[0];
+}
+
+export async function findBillingTransactionByProviderTxId(
+  providerTxId: string,
+): Promise<BillingTransaction | undefined> {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(billing_transactions)
+    .where(eq(billing_transactions.provider_tx_id, providerTxId))
+    .limit(1);
+  return rows[0];
+}
+
+export async function findPendingTransactionByUserId(
+  userId: string,
+): Promise<BillingTransaction | undefined> {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(billing_transactions)
+    .where(
+      and(
+        eq(billing_transactions.user_id, userId),
+        eq(billing_transactions.status, 'PENDING'),
+      ),
+    )
+    .limit(1);
   return rows[0];
 }
