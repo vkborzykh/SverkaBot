@@ -1,6 +1,5 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {
-  output: 'standalone',  // required for Netlify serverless functions
+const nextConfig = {  
   eslint: {
     ignoreDuringBuilds: true,
   },
