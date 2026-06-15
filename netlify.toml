@@ -3,9 +3,8 @@
   publish = ".next"
 
 [build.environment]
-  NETLIFY_NEXT_PLUGIN_SKIP = "false"  # Явно включаем плагин
+  NETLIFY_NEXT_PLUGIN_SKIP = "false"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
-  # Указываем версию плагина для гарантии совместимости
   version = "5.11.6"
