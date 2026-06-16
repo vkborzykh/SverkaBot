@@ -7,7 +7,7 @@ import { findTransactionsByImportId, type CanonicalTransaction } from '@/src/db/
 import { findParsingErrorsByImportId } from '@/src/db/repositories/parsing-errors';
 import { findUserById } from '@/src/db/repositories/users';
 import { findPrimaryReportByRunId, createReport } from '@/src/db/repositories/reports';
-import { storeReport, getStorageFilePath } from '@/src/lib/ingestion/storage';
+import { storeReport } from '@/src/lib/ingestion/storage';
 import {
   buildSummaryCSV,
   buildMatchedCSV,
@@ -23,7 +23,7 @@ import { createZip } from '@/src/lib/reports/zip';
 
 async function sendDocumentToUser(
   telegramId: bigint,
-  filePath: string,
+  fileBuffer: Buffer,
   filename: string,
   caption: string,
 ): Promise<void> {
@@ -31,8 +31,6 @@ async function sendDocumentToUser(
   if (!token) return;
 
   try {
-    const { readFile } = await import('fs/promises');
-    const fileBuffer = await readFile(filePath);
     const blob = new Blob([fileBuffer], { type: 'application/zip' });
 
     const formData = new globalThis.FormData();
@@ -184,11 +182,10 @@ export async function handleReportExport(job: Job): Promise<void> {
 
   // Send ZIP file to user via Telegram
   if (user?.telegram_id && process.env.NODE_ENV !== 'test') {
-    const filePath = getStorageFilePath(storagePath);
     const caption = `Отчёт по сверке ${runId} готов. Содержит сводку, совпадения, расхождения и детали оценки.`;
     await sendDocumentToUser(
       user.telegram_id,
-      filePath,
+      zipBuffer,
       `report_${runId.slice(0, 8)}.zip`,
       caption,
     );
