@@ -65,15 +65,22 @@ export async function handleRunSync(ctx: BotContext): Promise<void> {
     return;
   }
 
-  const result = await callRunApi(user.id);
+  // The self-call can fail on serverless (deployment protection, wrong base
+  // URL, non-JSON response → res.json() throws). Previously that exception
+  // bubbled up and was swallowed by the webhook, so the user saw nothing.
+  // Wrap it so the bot ALWAYS replies. (Phase 1 replaces this self-HTTP call
+  // with a direct in-process call to the reconciliation service.)
+  try {
+    const result = await callRunApi(user.id);
 
-  if ('error' in result) {
-    await ctx.reply(errorCodeToRussian(result.error.code));
-    return;
+    if ('error' in result) {
+      await ctx.reply(errorCodeToRussian(result.error.code));
+      return;
+    }
+
+    await ctx.reply(msg.syncStarted(result.run_id));
+  } catch (err) {
+    console.error('[runSync] failed:', err);
+    await ctx.reply('Не удалось запустить сверку. Попробуйте ещё раз через минуту.');
   }
-
-  await ctx.reply(msg.syncStarted(result.run_id));
-
-  // Warn if the bank import had LOW_CONFIDENCE — check via the run we just created
-  // (The reconcile job also sends this warning on completion, but we send it upfront too)
 }
