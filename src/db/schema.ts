@@ -510,3 +510,18 @@ export const jobs = pgTable(
     index('jobs_correlation_id_idx').on(t.correlation_id),
   ],
 );
+
+// ── telegram_sessions ─────────────────────────────────────────────────────────
+
+export const telegramSessions = pgTable(
+  'telegram_sessions',
+  {
+    telegram_id: bigint('telegram_id', { mode: 'bigint' }).primaryKey(),
+    state: text('state').notNull(),
+    updated_at: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    expires_at: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [index('telegram_sessions_expires_at_idx').on(t.expires_at)],
+);
