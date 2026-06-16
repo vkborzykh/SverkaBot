@@ -83,8 +83,8 @@ function resolveColIndex(
 interface ResolvedCols {
   dateIdx: number;
   amountIdx: number | null;
-  debitIdx: number | null;
-  creditIdx: number | null;
+  outIdx: number | null; // Дебет / списание / расход  -> OUT
+  inIdx: number | null; // Кредит / поступление / приход -> IN
   descIdx: number | null;
   cpIdx: number | null;
   refIdx: number | null;
@@ -99,22 +99,26 @@ function resolveColumns(mapping: ColumnMapping, headerRow: unknown[]): ResolvedC
   const cpIdx = resolveColIndex(mapping.counterpartyColumn, headerRow);
   const refIdx = resolveColIndex(mapping.referenceColumn, headerRow);
 
-  // Detect separate debit/credit columns in the header
+  // Detect separate debit/credit columns in the header.
+  // From the account holder's perspective on a расчётный счёт:
+  //   Дебет  = списание со счёта   -> OUT
+  //   Кредит = поступление на счёт -> IN
+  // (WB payouts are incoming -> they land in the Кредит/IN column.)
   const lowerHeaders = headerRow.map((h) =>
     typeof h === 'string' ? h.toLowerCase() : '',
   );
-  const debitKws = ['дебет', 'debit', 'приход', 'deposit'];
-  const creditKws = ['кредит', 'credit', 'расход', 'withdrawal'];
+  const outKws = ['дебет', 'списание', 'расход', 'debit', 'withdrawal'];
+  const inKws = ['кредит', 'поступление', 'приход', 'credit', 'deposit'];
 
-  const debitIdx = lowerHeaders.findIndex((h) => debitKws.some((k) => h.includes(k)));
-  const creditIdx = lowerHeaders.findIndex((h) => creditKws.some((k) => h.includes(k)));
-  const hasSplit = debitIdx >= 0 && creditIdx >= 0 && debitIdx !== creditIdx;
+  const outIdx = lowerHeaders.findIndex((h) => outKws.some((k) => h.includes(k)));
+  const inIdx = lowerHeaders.findIndex((h) => inKws.some((k) => h.includes(k)));
+  const hasSplit = outIdx >= 0 && inIdx >= 0 && outIdx !== inIdx;
 
   return {
     dateIdx,
     amountIdx: hasSplit ? null : amountIdx,
-    debitIdx: hasSplit ? debitIdx : null,
-    creditIdx: hasSplit ? creditIdx : null,
+    outIdx: hasSplit ? outIdx : null,
+    inIdx: hasSplit ? inIdx : null,
     descIdx,
     cpIdx,
     refIdx,
@@ -123,8 +127,8 @@ function resolveColumns(mapping: ColumnMapping, headerRow: unknown[]): ResolvedC
 
 function extractSplitAmount(
   row: unknown[],
-  debitIdx: number,
-  creditIdx: number,
+  outIdx: number,
+  inIdx: number,
 ): { amount: bigint; direction: 'IN' | 'OUT' } | null {
   const tryAmt = (v: unknown): bigint | null => {
     if (v === null || v === undefined || v === '') return null;
@@ -136,13 +140,15 @@ function extractSplitAmount(
     }
   };
 
-  const debitAmt = tryAmt(row[debitIdx]);
-  if (debitAmt !== null) {
-    return { amount: debitAmt < BigInt(0) ? -debitAmt : debitAmt, direction: 'IN' };
+  // Дебет column filled -> списание -> OUT
+  const outAmt = tryAmt(row[outIdx]);
+  if (outAmt !== null) {
+    return { amount: outAmt < BigInt(0) ? -outAmt : outAmt, direction: 'OUT' };
   }
-  const creditAmt = tryAmt(row[creditIdx]);
-  if (creditAmt !== null) {
-    return { amount: creditAmt < BigInt(0) ? -creditAmt : creditAmt, direction: 'OUT' };
+  // Кредит column filled -> поступление -> IN
+  const inAmt = tryAmt(row[inIdx]);
+  if (inAmt !== null) {
+    return { amount: inAmt < BigInt(0) ? -inAmt : inAmt, direction: 'IN' };
   }
   return null;
 }
@@ -361,8 +367,8 @@ export async function handleParseBank(job: Job): Promise<void> {
     let amountKopeks: bigint;
     let direction: 'IN' | 'OUT';
 
-    if (cols.debitIdx !== null && cols.creditIdx !== null) {
-      const split = extractSplitAmount(row, cols.debitIdx, cols.creditIdx);
+    if (cols.outIdx !== null && cols.inIdx !== null) {
+      const split = extractSplitAmount(row, cols.outIdx, cols.inIdx);
       if (!split) {
         errors.push({
           import_id: importId,
