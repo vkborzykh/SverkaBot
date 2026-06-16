@@ -46,8 +46,27 @@ async function loadFileBuffer(storagePath: string): Promise<Buffer> {
 
 // ── Header detection ─────────────────────────────────────────────────────────
 
-const DATE_KEYWORDS = ['дата', 'date', 'период'];
-const AMOUNT_KEYWORDS = ['сумма', 'amount', 'выплата', 'к выплате'];
+// Priority order matters. The real WB realization report has ~81 columns and
+// several "сумма…" columns. The payout column we must reconcile against is
+// "К перечислению Продавцу за реализованный товар" — but a naive "сумма" match
+// hits "Общая сумма штрафов" first. So we match the most specific payout/date
+// labels first and only fall back to generic ones.
+const DATE_PRIORITY = ['дата продажи', 'дата операции', 'дата заказа', 'дата', 'date'];
+const AMOUNT_PRIORITY = [
+  'к перечислению продавцу за реализованный товар',
+  'к перечислению продавцу',
+  'к перечислению',
+  'к выплате',
+  'сумма к выплате',
+];
+
+function pickByPriority(lower: string[], priorities: string[]): number {
+  for (const kw of priorities) {
+    const idx = lower.findIndex((h) => h.includes(kw));
+    if (idx !== -1) return idx;
+  }
+  return -1;
+}
 
 interface ColumnMap {
   dateCol: number;
@@ -60,12 +79,8 @@ interface ColumnMap {
 function detectColumns(headers: unknown[]): ColumnMap {
   const lower = headers.map((h) => normalizeText(h));
 
-  const dateCol = lower.findIndex((h) =>
-    DATE_KEYWORDS.some((k) => h.includes(k)),
-  );
-  const amountCol = lower.findIndex((h) =>
-    AMOUNT_KEYWORDS.some((k) => h.includes(k)),
-  );
+  const dateCol = pickByPriority(lower, DATE_PRIORITY);
+  const amountCol = pickByPriority(lower, AMOUNT_PRIORITY);
 
   if (dateCol === -1 || amountCol === -1) {
     throw new Error(
@@ -73,17 +88,16 @@ function detectColumns(headers: unknown[]): ColumnMap {
     );
   }
 
-  const referenceCol =
-    lower.findIndex((h) => h.includes('номер') || h.includes('reference') || h.includes('id')) ??
-    null;
-  const descriptionCol =
-    lower.findIndex((h) =>
-      h.includes('описание') || h.includes('description') || h.includes('назначение'),
-    ) ?? null;
-  const counterpartyCol =
-    lower.findIndex((h) =>
-      h.includes('контрагент') || h.includes('counterparty') || h.includes('получатель'),
-    ) ?? null;
+  const referenceCol = lower.findIndex(
+    (h) => h.includes('номер поставки') || h.includes('srid') || h.includes('номер'),
+  );
+  const descriptionCol = lower.findIndex(
+    (h) =>
+      h.includes('обоснование') || h.includes('назначение') || h.includes('описание'),
+  );
+  const counterpartyCol = lower.findIndex(
+    (h) => h.includes('партн') || h.includes('контрагент') || h.includes('получатель'),
+  );
 
   return {
     dateCol,
@@ -262,6 +276,11 @@ export async function handleParseWb(job: Job): Promise<void> {
       });
       continue;
     }
+
+    // Skip rows with a zero payout (returns, logistics-only, corrections,
+    // header/total artefacts). canonical_transactions has CHECK
+    // amount_kopeks != 0 — inserting a zero would throw and fail the batch.
+    if (amountKopeks === BigInt(0)) continue;
 
     const reference =
       colMap.referenceCol !== null
