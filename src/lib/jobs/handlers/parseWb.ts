@@ -1,6 +1,5 @@
-import { readFile } from 'fs/promises';
-import { join } from 'path';
 import * as XLSX from 'xlsx';
+import { loadFile } from '@/src/lib/ingestion/storage';
 import type { Job } from '@/src/db/repositories/jobs';
 import { findImportById, updateImport } from '@/src/db/repositories/imports';
 import {
@@ -18,7 +17,6 @@ import { sha256 } from '@/src/lib/ingestion/hash';
 
 const PARSER_VERSION = 'wb_v1';
 const ROW_LIMIT = 50_000;
-const UPLOADS_DIR = process.env.UPLOADS_DIR ?? '/tmp/sverkbot-uploads';
 
 // ── Telegram notification helper ─────────────────────────────────────────────
 
@@ -40,8 +38,7 @@ async function notifyUser(telegramId: bigint, text: string): Promise<void> {
 
 async function loadFileBuffer(storagePath: string): Promise<Buffer> {
   // storagePath format: "imports/{userId}/{hash}.xlsx"
-  const localPath = join(UPLOADS_DIR, storagePath);
-  return readFile(localPath);
+  return loadFile(storagePath);
 }
 
 // ── Header detection ─────────────────────────────────────────────────────────
