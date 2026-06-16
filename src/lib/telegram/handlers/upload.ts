@@ -114,7 +114,7 @@ async function handleFileUpload(
   const jobType = sourceType === 'WB' ? 'parse_wb' : 'parse_bank';
   await enqueue(jobType, newImport.id, { import_id: newImport.id });
 
-  clearSession(telegramId);
+  await clearSession(telegramId);
 
   if (sourceType === 'WB') {
     await ctx.reply(msg.uploadWbReceived(newImport.id));
@@ -134,7 +134,7 @@ export async function handleUploadWbCommand(ctx: BotContext): Promise<void> {
     return;
   }
 
-  setSession(telegramId, 'awaiting_wb_file');
+  await setSession(telegramId, 'awaiting_wb_file');
   await ctx.reply(msg.uploadWbPrompt);
 }
 
@@ -149,7 +149,7 @@ export async function handleUploadBankCommand(ctx: BotContext): Promise<void> {
     return;
   }
 
-  setSession(telegramId, 'awaiting_bank_file');
+  await setSession(telegramId, 'awaiting_bank_file');
   await ctx.reply(msg.uploadBankPrompt);
 }
 
