@@ -59,7 +59,7 @@ export async function routeUpdate(
     if (!from) return;
 
     const telegramId = BigInt(from.id);
-    const sessionState = getSession(telegramId);
+    const sessionState = await getSession(telegramId);
 
     // Handle document uploads based on awaiting state
     if ('document' in message && message.document) {
