@@ -1,11 +1,22 @@
-import { writeFile, mkdir, unlink, rm } from 'fs/promises';
-import { join } from 'path';
+import { getSupabaseAdmin, STORAGE_BUCKET } from '@/src/lib/supabase/client';
 
-// In production this would be replaced with S3-compatible / Bolt Storage.
-// For the MVP we write to a local uploads directory that maps to object storage.
-// The storage_path returned is the canonical reference stored in DB.
+// Files live in Supabase Storage (persistent across serverless invocations).
+// Object keys are kept identical to the previous local-FS layout so existing
+// `imports.storage_path` / `reports.storage_path` values remain valid:
+//   imports/{userId}/{fileHash}.{ext}
+//   reports/{runId}/report.zip
 
-const UPLOADS_DIR = process.env.UPLOADS_DIR ?? '/tmp/sverkbot-uploads';
+function isTest(): boolean {
+  return process.env.NODE_ENV === 'test';
+}
+
+function contentTypeForExt(ext: string): string {
+  if (ext === 'csv') return 'text/csv';
+  if (ext === 'xlsx') {
+    return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  }
+  return 'application/octet-stream';
+}
 
 export async function storeFile(
   userId: string,
@@ -14,49 +25,59 @@ export async function storeFile(
   buffer: Buffer,
 ): Promise<string> {
   const storagePath = `imports/${userId}/${fileHash}.${ext}`;
+  if (isTest()) return storagePath;
 
-  if (process.env.NODE_ENV !== 'test') {
-    const dir = join(UPLOADS_DIR, 'imports', userId);
-    await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, `${fileHash}.${ext}`), buffer);
-  }
-
+  const { error } = await getSupabaseAdmin()
+    .storage.from(STORAGE_BUCKET)
+    .upload(storagePath, buffer, {
+      contentType: contentTypeForExt(ext),
+      upsert: true,
+    });
+  if (error) throw new Error(`Storage upload failed (${storagePath}): ${error.message}`);
   return storagePath;
 }
 
-export async function storeReport(
-  runId: string,
-  buffer: Buffer,
-): Promise<string> {
+export async function storeReport(runId: string, buffer: Buffer): Promise<string> {
   const storagePath = `reports/${runId}/report.zip`;
+  if (isTest()) return storagePath;
 
-  if (process.env.NODE_ENV !== 'test') {
-    const dir = join(UPLOADS_DIR, 'reports', runId);
-    await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, 'report.zip'), buffer);
-  }
-
+  const { error } = await getSupabaseAdmin()
+    .storage.from(STORAGE_BUCKET)
+    .upload(storagePath, buffer, { contentType: 'application/zip', upsert: true });
+  if (error) throw new Error(`Storage upload failed (${storagePath}): ${error.message}`);
   return storagePath;
 }
 
-export function getStorageFilePath(storagePath: string): string {
-  return join(UPLOADS_DIR, storagePath);
+export async function loadFile(storagePath: string): Promise<Buffer> {
+  if (isTest()) return Buffer.alloc(0);
+
+  const { data, error } = await getSupabaseAdmin()
+    .storage.from(STORAGE_BUCKET)
+    .download(storagePath);
+  if (error || !data) {
+    throw new Error(`Storage download failed (${storagePath}): ${error?.message ?? 'no data'}`);
+  }
+  return Buffer.from(await data.arrayBuffer());
 }
 
 export async function deleteFile(storagePath: string): Promise<void> {
-  if (process.env.NODE_ENV === 'test') return;
-  try {
-    await unlink(join(UPLOADS_DIR, storagePath));
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-  }
+  if (isTest()) return;
+  // remove() is idempotent: missing objects are not an error.
+  const { error } = await getSupabaseAdmin()
+    .storage.from(STORAGE_BUCKET)
+    .remove([storagePath]);
+  if (error) throw new Error(`Storage delete failed (${storagePath}): ${error.message}`);
 }
 
-export async function deleteDirectory(storagePath: string): Promise<void> {
-  if (process.env.NODE_ENV === 'test') return;
-  try {
-    await rm(join(UPLOADS_DIR, storagePath), { recursive: true, force: true });
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-  }
+export async function deleteDirectory(prefix: string): Promise<void> {
+  if (isTest()) return;
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await supabase.storage.from(STORAGE_BUCKET).list(prefix);
+  if (error) throw new Error(`Storage list failed (${prefix}): ${error.message}`);
+  if (!data || data.length === 0) return;
+
+  const paths = data.map((obj) => `${prefix}/${obj.name}`);
+  const { error: rmError } = await supabase.storage.from(STORAGE_BUCKET).remove(paths);
+  if (rmError) throw new Error(`Storage delete failed (${prefix}): ${rmError.message}`);
 }
