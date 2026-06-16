@@ -1,6 +1,5 @@
-import { readFile } from 'fs/promises';
-import { join } from 'path';
 import type { Job } from '@/src/db/repositories/jobs';
+import { loadFile } from '@/src/lib/ingestion/storage';
 import { findImportById, updateImport } from '@/src/db/repositories/imports';
 import { findUserById } from '@/src/db/repositories/users';
 import {
@@ -30,7 +29,6 @@ import { getSetting } from '@/src/lib/settings/settings';
 
 const PARSER_VERSION = 'bank_v1';
 const ROW_LIMIT = 50_000;
-const UPLOADS_DIR = process.env.UPLOADS_DIR ?? '/tmp/sverkbot-uploads';
 
 // ── Telegram notification helper ──────────────────────────────────────────────
 
@@ -51,7 +49,7 @@ async function notifyUser(telegramId: bigint, text: string): Promise<void> {
 // ── File loading ──────────────────────────────────────────────────────────────
 
 async function loadFileBuffer(storagePath: string): Promise<Buffer> {
-  return readFile(join(UPLOADS_DIR, storagePath));
+  return loadFile(storagePath);
 }
 
 // ── Row parsing helpers ───────────────────────────────────────────────────────
