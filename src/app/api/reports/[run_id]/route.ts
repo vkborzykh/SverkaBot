@@ -1,10 +1,9 @@
 import { NextRequest } from 'next/server';
-import { readFile } from 'fs/promises';
 import { requireInternalToken } from '@/src/lib/guards';
 import { okResponse, errResponse } from '@/src/lib/http';
 import { findRunById } from '@/src/db/repositories/reconciliation-runs';
 import { findPrimaryReportByRunId } from '@/src/db/repositories/reports';
-import { getStorageFilePath } from '@/src/lib/ingestion/storage';
+import { loadFile } from '@/src/lib/ingestion/storage';
 
 export async function GET(
   req: NextRequest,
@@ -35,9 +34,8 @@ export async function GET(
   }
 
   if (download) {
-    const filePath = getStorageFilePath(report.storage_path);
     try {
-      const buffer = await readFile(filePath);
+      const buffer = await loadFile(report.storage_path);
       return new Response(buffer, {
         status: 200,
         headers: {
