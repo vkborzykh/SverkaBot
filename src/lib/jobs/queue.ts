@@ -1,4 +1,6 @@
 import { createJob } from '@/src/db/repositories/jobs';
+import { drainQueue } from '@/src/lib/jobs/runner';
+import { runBackground } from '@/src/lib/jobs/background';
 
 export type JobType =
   | 'parse_wb'
@@ -24,21 +26,12 @@ export async function enqueue(
     payload,
   });
 
-  // Fire-and-forget trigger — does not block the caller
-  const internalToken = process.env.INTERNAL_TOKEN;
-  if (internalToken) {
-    const base =
-      process.env.NEXT_PUBLIC_APP_URL ??
-      process.env.VERCEL_URL ??
-      'http://localhost:3000';
-    const url = `${base.startsWith('http') ? base : `https://${base}`}/api/jobs/process`;
-    fetch(url, {
-      method: 'POST',
-      headers: { 'x-internal-token': internalToken },
-    }).catch(() => {
-      // intentionally ignored — cron is the fallback
-    });
-  }
+  // Process the queue in-process, kept alive past the HTTP response via
+  // waitUntil. No self-HTTP call (which was being killed on serverless),
+  // and the just-created job runs in the SAME invocation that wrote the
+  // upload to local storage — so the parser can read it before /tmp is
+  // recycled. The daily cron is the long-tail fallback for retries.
+  runBackground(drainQueue());
 
   return job.id;
 }
