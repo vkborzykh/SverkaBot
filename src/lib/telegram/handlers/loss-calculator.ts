@@ -4,7 +4,7 @@ import { msg } from '../messages.ru';
 
 export async function handleLossCalculator(ctx: Context): Promise<void> {
   const telegramId = BigInt(ctx.from!.id);
-  setSession(telegramId, 'awaiting_turnover');
+  await setSession(telegramId, 'awaiting_turnover');
   await ctx.reply(msg.lossCalcPrompt);
 }
 
@@ -12,7 +12,7 @@ export async function handleTurnoverInput(
   ctx: Context & { message: { text: string } },
 ): Promise<void> {
   const telegramId = BigInt(ctx.from!.id);
-  const state = getSession(telegramId);
+  const state = await getSession(telegramId);
   if (state !== 'awaiting_turnover') return;
 
   const raw = ctx.message.text.replace(/[\s,]/g, '');
@@ -23,7 +23,7 @@ export async function handleTurnoverInput(
     return;
   }
 
-  clearSession(telegramId);
+  await clearSession(telegramId);
 
   const monthly = Math.round(turnover * 0.04);
   const yearly = monthly * 12;
