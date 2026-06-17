@@ -1,13 +1,8 @@
 import type { Job } from '@/src/db/repositories/jobs';
 import { findRunById, updateRun } from '@/src/db/repositories/reconciliation-runs';
-import { findMatchesByRunId } from '@/src/db/repositories/reconciliation-matches';
-import { findMatchItemsByMatchId } from '@/src/db/repositories/reconciliation-match-items';
-import { findTransactionsByImportId } from '@/src/db/repositories/canonical-transactions';
 import { findUserById } from '@/src/db/repositories/users';
 import { findImportById } from '@/src/db/repositories/imports';
-import { generateCandidates, updateCandidateScores } from '@/src/lib/reconciliation/candidates';
-import { globalMatch } from '@/src/lib/reconciliation/assignment';
-import { detectSplitCombined } from '@/src/lib/reconciliation/splitCombined';
+import { reconcileWbPayout, type WbPayoutResult } from '@/src/lib/reconciliation/wbPayout';
 import { enqueue } from '@/src/lib/jobs/queue';
 
 async function notifyUser(telegramId: bigint, text: string): Promise<void> {
@@ -21,6 +16,34 @@ async function notifyUser(telegramId: bigint, text: string): Promise<void> {
     });
   } catch {
     // notification failures must not fail the job
+  }
+}
+
+// kopeks (bigint) → "12 345,67 ₽" with RU formatting
+function rub(kopeks: bigint): string {
+  const neg = kopeks < BigInt(0);
+  const abs = neg ? -kopeks : kopeks;
+  const whole = abs / BigInt(100);
+  const cents = abs % BigInt(100);
+  const grouped = whole
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, '\u00A0'); // non-breaking space thousands
+  return `${neg ? '−' : ''}${grouped},${cents.toString().padStart(2, '0')} ₽`;
+}
+
+function buildUserMessage(r: WbPayoutResult): string {
+  const e = rub(r.expectedNetKopeks);
+  const got = rub(r.receivedKopeks);
+  switch (r.status) {
+    case 'reconciled':
+      return `✅ Сверка завершена. Ожидалось к выплате: ${e}. Поступило от Wildberries: ${got}. Расхождений не найдено.`;
+    case 'overpaid':
+      return `✅ Сверка завершена. Ожидалось: ${e}. Поступило: ${got} (больше ожидаемого — расхождений в вашу пользу).`;
+    case 'underpaid':
+      return `⚠️ Сверка завершена. Ожидалось: ${e}. Поступило: ${got}. Возможная недоплата: ${rub(r.discrepancyKopeks)}.`;
+    case 'missing':
+    default:
+      return `⚠️ Сверка завершена. Ожидалось к выплате: ${e}, но поступлений от Wildberries не найдено. Возможная потеря: ${rub(r.unmatchedAmountKopeks)}.`;
   }
 }
 
@@ -40,95 +63,29 @@ export async function handleReconcile(job: Job): Promise<void> {
   try {
     await updateRun(runId, { status: 'RUNNING', started_at: run.started_at ?? new Date() });
 
-    // 1. Generate candidates
-    await generateCandidates(runId);
-
-    // 2. Score candidates
-    await updateCandidateScores(runId);
-
-    // 3. Global 1:1 matching
-    await globalMatch(runId);
-
-    // 4. Split / combined detection
-    await detectSplitCombined(runId);
-
-    // 5. Recompute final metrics from persisted matches
-    const totalWbRows = run.total_wb_rows ?? 0;
-    const matches = await findMatchesByRunId(runId);
-
-    let matchedCount = 0;
-    let splitCount = 0;
-    let combinedCount = 0;
-    let ambiguousCount = 0;
-
-    const matchedWbTxIds = new Set<string>();
-    const ambiguousWbTxIds = new Set<string>();
-
-    for (const m of matches) {
-      const items = await findMatchItemsByMatchId(m.id);
-      const wbItems = items.filter((i) => i.side === 'WB');
-
-      if (m.match_type === 'MATCHED') {
-        matchedCount++;
-        for (const i of wbItems) matchedWbTxIds.add(i.transaction_id);
-      } else if (m.match_type === 'SPLIT_MATCHED') {
-        splitCount++;
-        matchedCount++;
-        for (const i of wbItems) matchedWbTxIds.add(i.transaction_id);
-      } else if (m.match_type === 'COMBINED_MATCHED') {
-        combinedCount++;
-        matchedCount++;
-        for (const i of wbItems) matchedWbTxIds.add(i.transaction_id);
-      } else if (m.match_type === 'AMBIGUOUS') {
-        ambiguousCount++;
-        for (const i of wbItems) ambiguousWbTxIds.add(i.transaction_id);
-      }
-    }
-
-    const wbTxs = await findTransactionsByImportId(run.wb_import_id);
-    const unmatchedWbTxs = wbTxs.filter(
-      (tx) => !matchedWbTxIds.has(tx.id) && !ambiguousWbTxIds.has(tx.id),
-    );
-    const ambiguousWbTxs = wbTxs.filter((tx) => ambiguousWbTxIds.has(tx.id));
-
-    const unmatchedAmount = unmatchedWbTxs.reduce(
-      (s, tx) => s + (tx.amount_kopeks ?? BigInt(0)),
-      BigInt(0),
-    );
-    const ambiguousAmount = ambiguousWbTxs.reduce(
-      (s, tx) => s + (tx.amount_kopeks ?? BigInt(0)),
-      BigInt(0),
-    );
-
-    const unmatchedCount = unmatchedWbTxs.length;
-    const matchRate =
-      totalWbRows > 0
-        ? parseFloat(((matchedCount / totalWbRows) * 100).toFixed(2))
-        : 0;
+    // Report-level reconciliation: aggregate WB net payout vs bank WB credits.
+    // (An empty candidate set is not a failure — see "missing"/UNMATCHED below.)
+    const result = await reconcileWbPayout(run);
 
     await updateRun(runId, {
       status: 'COMPLETED',
       completed_at: new Date(),
-      matched_count: matchedCount,
-      unmatched_count: unmatchedCount,
-      ambiguous_count: ambiguousCount,
-      split_count: splitCount,
-      combined_count: combinedCount,
-      match_rate: String(matchRate.toFixed(2)),
-      unmatched_amount: unmatchedAmount,
-      ambiguous_amount: ambiguousAmount,
+      matched_count: result.matchedCount,
+      unmatched_count: result.unmatchedCount,
+      ambiguous_count: result.ambiguousCount,
+      split_count: result.splitCount,
+      combined_count: result.combinedCount,
+      match_rate: result.matchRate.toFixed(2),
+      unmatched_amount: result.unmatchedAmountKopeks,
+      ambiguous_amount: result.ambiguousAmountKopeks,
     });
 
-    // 6. Enqueue report export
+    // Enqueue report export
     await enqueue('report_export', runId, { run_id: runId });
 
-    // 7. Notify user
+    // Notify user
     if (user?.telegram_id) {
-      const unmatchedRub = (Number(unmatchedAmount) / 100).toFixed(2);
-      await notifyUser(
-        user.telegram_id,
-        `✅ Сверка завершена. Совпадений: ${matchedCount}. Не найдено: ${unmatchedCount}. Неоднозначно: ${ambiguousCount}. Оценка возможных потерь: ${unmatchedRub} ₽.`,
-      );
+      await notifyUser(user.telegram_id, buildUserMessage(result));
 
       if (bankImport?.quality_status === 'LOW_CONFIDENCE') {
         await notifyUser(
