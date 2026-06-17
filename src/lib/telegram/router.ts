@@ -11,8 +11,8 @@ import {
   handleBankFileReceived,
   type DocumentInfo,
 } from './handlers/upload';
+import { handleHistory } from './handlers/history';
 import {
-  handleHistory,
   handleHelp,
   handleGetReport,
   handleStatus,
@@ -82,7 +82,9 @@ export async function routeUpdate(
         await handleBankFileReceived(ctx, docInfo);
         return;
       }
-      // Document received without an active session — ignore silently
+      // Document received without an active upload session. With DB-backed
+      // sessions (Phase 1) this is rare, but never go silent — guide the user.
+      await ctx.reply(msg.uploadNoSession);
       return;
     }
 
