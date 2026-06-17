@@ -20,6 +20,8 @@ import {
   type MatchedRow,
 } from '@/src/lib/reports/csvBuilders';
 import { createZip } from '@/src/lib/reports/zip';
+import { buildHtmlReport, type ClaimRow } from '@/src/lib/reports/htmlReport';
+import { buildClaimCSV } from '@/src/lib/reports/claimBuilder';
 
 async function sendDocumentToUser(
   telegramId: bigint,
@@ -152,6 +154,48 @@ export async function handleReportExport(job: Job): Promise<void> {
   // Loss estimate: unmatched + 50% of ambiguous
   const lossEstimate = computeLossEstimate(run);
 
+  // WB aggregate (expected / received / discrepancy) from the run's evidence.
+  let expectedKopeks = BigInt(0);
+  let receivedKopeks = BigInt(0);
+  let aggStatus: 'reconciled' | 'underpaid' | 'missing' | 'overpaid' = 'reconciled';
+  for (const match of matches) {
+    const ev = await findEvidenceByMatchId(match.id);
+    const pen = ev?.penalties as Record<string, unknown> | undefined;
+    if (pen && pen.strategy === 'wb_net_payout') {
+      expectedKopeks = BigInt(String(pen.expected_net_kopeks ?? '0'));
+      receivedKopeks = BigInt(String(pen.received_kopeks ?? '0'));
+      aggStatus = (pen.status as typeof aggStatus) ?? 'reconciled';
+      break;
+    }
+  }
+  const lossKopeks = expectedKopeks - receivedKopeks > BigInt(0) ? expectedKopeks - receivedKopeks : BigInt(0);
+  const matchRate = run.match_rate ? Number(run.match_rate) : aggStatus === 'reconciled' || aggStatus === 'overpaid' ? 100 : 0;
+
+  const fmtDmy = (d: Date | string | null | undefined): string => {
+    if (!d) return '';
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return '';
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${p(dt.getDate())}.${p(dt.getMonth() + 1)}.${dt.getFullYear()}`;
+  };
+  const claimRows: ClaimRow[] = unmatchedWbTxs.map((tx) => ({
+    dateStr: fmtDmy(tx.transaction_date),
+    amountKopeks: tx.amount_kopeks ?? BigInt(0),
+    reference: tx.reference,
+    description: tx.description,
+  }));
+
+  const htmlReport = buildHtmlReport({
+    runId,
+    dateStr: fmtDmy(run.created_at),
+    status: aggStatus,
+    expectedKopeks,
+    receivedKopeks,
+    lossKopeks,
+    matchRate,
+    claimRows,
+  });
+
   // Build CSV files
   const csvFiles: Record<string, string> = {
     'summary.csv': buildSummaryCSV(run, lossEstimate),
@@ -163,6 +207,8 @@ export async function handleReportExport(job: Job): Promise<void> {
     'evidence.csv': buildEvidenceCSV(evidenceRows),
     'parsing_errors.csv': buildParsingErrorsCSV([...wbErrors, ...bankErrors]),
     'metrics.csv': buildMetricsCSV(run),
+    'claim.csv': buildClaimCSV(unmatchedWbTxs),
+    'report.html': htmlReport,
   };
 
   // Create ZIP archive

@@ -172,4 +172,23 @@ export const msg = {
     'Чтобы загрузить файл, сначала нажмите «📊 Загрузить WB отчёт» или «🏦 Загрузить выписку», затем пришлите документ.',
   uploadError: 'Не удалось обработать файл. Попробуйте ещё раз через минуту.',
   syncGenericError: 'Не удалось запустить сверку. Попробуйте ещё раз через минуту.',
+
+  // ── /status (import) ─────────────────────────────────────────────────────────
+  importStatusNotFound: 'Импорт не найден.',
+  importStatusReceived: 'Файл принят и ожидает обработки.',
+  importStatusProcessing: 'Файл обрабатывается, подождите немного.',
+  importStatusFailed: '❌ Не удалось обработать файл.',
+  importStatusCompleted: (
+    quality: string,
+    parseRate: string | number,
+    errorCount: number,
+  ): string =>
+    `✅ Обработка завершена. Качество распознавания: ${quality}. Доля распознанных строк: ${parseRate}%. Ошибок в строках: ${errorCount}.`,
+
+  // ── /get_report ──────────────────────────────────────────────────────────────
+  getReportNotFound: 'Сверка не найдена.',
+  getReportNotReady: 'Сверка ещё не завершена. Проверьте статус: /sync_status <run_id>.',
+  getReportGenerating: 'Готовлю отчёт — он придёт в течение минуты.',
+  getReportError: 'Не удалось получить отчёт. Попробуйте позже.',
+  getReportCaption: 'Ваш отчёт по сверке.',
 } as const;

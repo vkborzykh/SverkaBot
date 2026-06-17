@@ -12,10 +12,10 @@ import {
   type DocumentInfo,
 } from './handlers/upload';
 import { handleHistory } from './handlers/history';
+import { handleStatus } from './handlers/status';
+import { handleGetReport } from './handlers/getReport';
 import {
   handleHelp,
-  handleGetReport,
-  handleStatus,
 } from './handlers/stubs';
 import { handleDeleteMyData, handleDeleteConfirm, handleDeleteCancel } from './handlers/deleteData';
 import { handleSubscribe } from './handlers/subscribe';
