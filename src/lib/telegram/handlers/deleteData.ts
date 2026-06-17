@@ -17,14 +17,18 @@ export async function handleDeleteConfirm(ctx: Context): Promise<void> {
   const user = await findUserByTelegramId(BigInt(from.id));
   if (!user) {
     await ctx.editMessageReplyMarkup(undefined);
-    await ctx.reply(msg.deleteSuccess);
+    await ctx.reply(msg.deleteNothing);
     return;
   }
 
   try {
-    await deleteUserData(user.id);
+    const summary = await deleteUserData(user.id);
     await ctx.editMessageReplyMarkup(undefined);
-    await ctx.reply(msg.deleteSuccess);
+    if (summary.importCount === 0 && summary.runCount === 0) {
+      await ctx.reply(msg.deleteNothing);
+    } else {
+      await ctx.reply(msg.deleteSuccess);
+    }
   } catch {
     await ctx.editMessageReplyMarkup(undefined);
     await ctx.reply(msg.deleteError);

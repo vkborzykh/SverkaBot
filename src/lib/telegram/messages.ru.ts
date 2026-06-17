@@ -47,7 +47,7 @@ export const msg = {
   syncNeedBothFilesCompleted:
     'Сначала загрузите оба файла — отчёт WB и выписку банка, и дождитесь завершения обработки.',
   syncPeriodMismatch:
-    'Периоды отчёта WB и выписки банка не совпадают. Загрузите файлы за один месяц.',
+    'Периоды отчёта WB и выписки банка не совпадают. Загрузите файлы за один период.',
   syncStarted: (runId: string) =>
     `Сверка запущена (ID: ${runId}). Обычно занимает до минуты. Статус: /sync_status ${runId}.`,
   syncCompleted: (matched: number, unmatched: number, ambiguous: number, lossRub: string) =>
@@ -149,4 +149,27 @@ export const msg = {
     `Повторная генерация отчёта поставлена в очередь.\nСверка: ${runId}\nЗадача: ${jobId}`,
   adminRetryMissingId: 'Укажите ID сверки: /retry_export <run_id>',
   adminRunNotFound: 'Сверка не найдена.',
+
+  // ── Phase 3 additions ───────────────────────────────────────────────────────
+  historyEmpty: '🤷‍♂️ История сверок отсутствует.',
+  historyEntry: (n: number, dateStr: string, lossKopeks: bigint): string => {
+    const fmtRub = (k: bigint): string => {
+      const neg = k < BigInt(0);
+      const a = neg ? -k : k;
+      const whole = (a / BigInt(100))
+        .toString()
+        .replace(/\B(?=(\d{3})+(?!\d))/g, '\u00A0');
+      const cents = (a % BigInt(100)).toString().padStart(2, '0');
+      return `${neg ? '−' : ''}${whole},${cents} ₽`;
+    };
+    return lossKopeks > BigInt(0)
+      ? `${n}. ${dateStr} — возможные потери: ${fmtRub(lossKopeks)}`
+      : `${n}. ${dateStr} — расхождений не найдено`;
+  },
+  deleteNothing:
+    '🤷 Данных для удаления не найдено — вы ещё не загружали файлы и не запускали сверки.',
+  uploadNoSession:
+    'Чтобы загрузить файл, сначала нажмите «📊 Загрузить WB отчёт» или «🏦 Загрузить выписку», затем пришлите документ.',
+  uploadError: 'Не удалось обработать файл. Попробуйте ещё раз через минуту.',
+  syncGenericError: 'Не удалось запустить сверку. Попробуйте ещё раз через минуту.',
 } as const;
