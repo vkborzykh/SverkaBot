@@ -235,21 +235,22 @@ export async function handleParseWb(job: Job): Promise<void> {
   const errors: NewParsingError[] = [];
   const successDates: Date[] = [];
 
+  let processedRows = 0;
+
   for (let i = 0; i < dataRows.length; i++) {
     const row = dataRows[i];
     const rowNumber = i + 1; // 1-based, relative to data start
-
-    const rawDate = row[colMap.dateCol];
-    const rawAmount = row[colMap.amountCol];
-
-    // Build a short raw fragment for error logging (≤200 chars)
     const rawFragment = JSON.stringify(row).slice(0, 200);
 
-    let txDate: Date;
-    let amountKopeks: bigint;
+    // Skip fully empty rows silently (don't count against quality).
+    const isEmpty = row.every(
+      (c) => c === null || c === undefined || String(c).trim() === '',
+    );
+    if (isEmpty) continue;
 
+    let txDate: Date;
     try {
-      txDate = normalizeDate(rawDate);
+      txDate = normalizeDate(row[colMap.dateCol]);
     } catch (e) {
       errors.push({
         import_id: importId,
@@ -261,70 +262,83 @@ export async function handleParseWb(job: Job): Promise<void> {
       continue;
     }
 
-    try {
-      amountKopeks = normalizeAmount(rawAmount);
-    } catch (e) {
-      errors.push({
-        import_id: importId,
-        row_number: rowNumber,
-        error_code: 'INVALID_AMOUNT',
-        error_message: e instanceof Error ? e.message : String(e),
-        raw_fragment: rawFragment,
-      });
+    // Monetary components of this WB row:
+    //   payout (col 33, «К перечислению …»): > 0 → IN, < 0 → OUT (возврат)
+    // Net expected payout = Σ(IN) − Σ(OUT) ≈ Σ(col 33) netted for returns,
+    // which matches what WB actually transfers. (Other cost columns —
+    // логистика/хранение/штрафы/удержания — are informational in the MVP and
+    // are NOT separately subtracted; on real reports that double-counts.)
+    const components: { amount: bigint; direction: 'IN' | 'OUT'; kind: string }[] = [];
+
+    const rawPayout = row[colMap.amountCol];
+    if (rawPayout !== null && rawPayout !== undefined && String(rawPayout).trim() !== '') {
+      try {
+        const p = normalizeAmount(rawPayout);
+        if (p !== BigInt(0)) {
+          components.push({
+            amount: p < BigInt(0) ? -p : p,
+            direction: p < BigInt(0) ? 'OUT' : 'IN',
+            kind: p < BigInt(0) ? 'возврат' : 'payout',
+          });
+        }
+      } catch (e) {
+        errors.push({
+          import_id: importId,
+          row_number: rowNumber,
+          error_code: 'INVALID_AMOUNT',
+          error_message: e instanceof Error ? e.message : String(e),
+          raw_fragment: rawFragment,
+        });
+        continue;
+      }
+    }
+
+    // A valid row with no monetary effect still counts as processed.
+    if (components.length === 0) {
+      processedRows++;
       continue;
     }
 
-    // Skip rows with a zero payout (returns, logistics-only, corrections,
-    // header/total artefacts). canonical_transactions has CHECK
-    // amount_kopeks != 0 — inserting a zero would throw and fail the batch.
-    if (amountKopeks === BigInt(0)) continue;
-
     const reference =
-      colMap.referenceCol !== null
-        ? normalizeText(row[colMap.referenceCol])
-        : null;
+      colMap.referenceCol !== null ? normalizeText(row[colMap.referenceCol]) : null;
     const description =
-      colMap.descriptionCol !== null
-        ? normalizeText(row[colMap.descriptionCol])
-        : null;
+      colMap.descriptionCol !== null ? normalizeText(row[colMap.descriptionCol]) : null;
     const counterparty =
-      colMap.counterpartyCol !== null
-        ? normalizeText(row[colMap.counterpartyCol])
-        : null;
+      colMap.counterpartyCol !== null ? normalizeText(row[colMap.counterpartyCol]) : null;
 
-    // Stable row hash
-    const hashInput = Buffer.from(
-      JSON.stringify({
-        importId,
-        rowNumber,
-        txDate: txDate.toISOString(),
-        amountKopeks: String(amountKopeks),
+    const rawPayload = JSON.parse(JSON.stringify(row).slice(0, 4000)) as unknown;
+
+    for (const c of components) {
+      const rowHash = sha256(
+        Buffer.from(
+          JSON.stringify({
+            importId,
+            rowNumber,
+            kind: c.kind,
+            direction: c.direction,
+            txDate: txDate.toISOString(),
+            amount: String(c.amount),
+          }),
+        ),
+      );
+      transactions.push({
+        import_id: importId,
+        source_type: 'WB',
+        row_number: rowNumber,
+        transaction_date: txDate,
+        amount_kopeks: c.amount,
+        currency: 'RUB',
+        direction: c.direction,
         reference,
-        description,
-      }),
-    );
-    const rowHash = sha256(hashInput);
+        description:
+          c.kind === 'payout' ? description : `${description ?? ''} [${c.kind}]`.trim(),
+        counterparty,
+        row_hash: rowHash,
+        raw_payload: c.kind === 'payout' ? rawPayload : null,
+      });
+    }
 
-    // Limit raw_payload size
-    const rawPayload = JSON.parse(
-      JSON.stringify(row).slice(0, 4000),
-    ) as unknown;
-
-    transactions.push({
-      import_id: importId,
-      source_type: 'WB',
-      row_number: rowNumber,
-      transaction_date: txDate,
-      amount_kopeks: amountKopeks,
-      currency: 'RUB',
-      direction: 'IN',
-      reference,
-      description,
-      counterparty,
-      row_hash: rowHash,
-      raw_payload: rawPayload,
-    });
-
+    processedRows++;
     successDates.push(txDate);
   }
 
@@ -336,7 +350,7 @@ export async function handleParseWb(job: Job): Promise<void> {
   await createParsingErrors(errors);
 
   const totalRows = dataRows.length;
-  const successRows = transactions.length;
+  const successRows = processedRows;
   const errorCount = errors.length;
   const parseSuccessRate =
     totalRows > 0 ? ((successRows / totalRows) * 100).toFixed(2) : '0.00';
