@@ -7,6 +7,7 @@ import { enqueue } from '@/src/lib/jobs/queue';
 import { checkAccess } from '@/src/lib/telegram/access';
 import { msg } from '@/src/lib/telegram/messages.ru';
 import { setSession, clearSession } from '@/src/lib/telegram/session';
+import { isAdmin } from '@/src/lib/telegram/handlers/admin';
 import type { BotContext } from '@/src/lib/telegram/router';
 
 export interface DocumentInfo {
@@ -123,8 +124,14 @@ async function handleFileUpload(
       await ctx.reply(msg.uploadBankReceived);
     }
   } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
     console.error('[upload] failed to store/enqueue:', err);
-    await ctx.reply(msg.uploadError);
+    // During testing, show the real cause to admins (or when DEBUG_UPLOAD_ERRORS
+    // is set) so the operator doesn't have to dig through Vercel logs. Regular
+    // users always get the generic message.
+    const showDetail =
+      isAdmin(telegramId) || process.env.DEBUG_UPLOAD_ERRORS === 'true';
+    await ctx.reply(showDetail ? `${msg.uploadError}\n\n🔧 ${detail}` : msg.uploadError);
   }
 }
 
