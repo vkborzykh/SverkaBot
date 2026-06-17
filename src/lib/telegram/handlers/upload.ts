@@ -96,30 +96,35 @@ async function handleFileUpload(
   // Determine extension
   const ext = doc.fileName.toLowerCase().endsWith('.csv') ? 'csv' : 'xlsx';
 
-  // Store file
-  const storagePath = await storeFile(user.id, fileHash, ext, buffer);
+  try {
+    // Store file
+    const storagePath = await storeFile(user.id, fileHash, ext, buffer);
 
-  // Create import record
-  const newImport = await createImport({
-    user_id: user.id,
-    source_type: sourceType,
-    storage_path: storagePath,
-    original_filename: doc.fileName,
-    file_hash: fileHash,
-    file_size_bytes: BigInt(buffer.byteLength),
-    status: 'RECEIVED',
-  });
+    // Create import record
+    const newImport = await createImport({
+      user_id: user.id,
+      source_type: sourceType,
+      storage_path: storagePath,
+      original_filename: doc.fileName,
+      file_hash: fileHash,
+      file_size_bytes: BigInt(buffer.byteLength),
+      status: 'RECEIVED',
+    });
 
-  // Enqueue parsing job
-  const jobType = sourceType === 'WB' ? 'parse_wb' : 'parse_bank';
-  await enqueue(jobType, newImport.id, { import_id: newImport.id });
+    // Enqueue parsing job
+    const jobType = sourceType === 'WB' ? 'parse_wb' : 'parse_bank';
+    await enqueue(jobType, newImport.id, { import_id: newImport.id });
 
-  await clearSession(telegramId);
+    await clearSession(telegramId);
 
-  if (sourceType === 'WB') {
-    await ctx.reply(msg.uploadWbReceived(newImport.id));
-  } else {
-    await ctx.reply(msg.uploadBankReceived);
+    if (sourceType === 'WB') {
+      await ctx.reply(msg.uploadWbReceived(newImport.id));
+    } else {
+      await ctx.reply(msg.uploadBankReceived);
+    }
+  } catch (err) {
+    console.error('[upload] failed to store/enqueue:', err);
+    await ctx.reply(msg.uploadError);
   }
 }
 
