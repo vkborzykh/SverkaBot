@@ -6,16 +6,28 @@ import { reconcileWbPayout, type WbPayoutResult } from '@/src/lib/reconciliation
 import { enqueue } from '@/src/lib/jobs/queue';
 
 async function notifyUser(telegramId: bigint, text: string): Promise<void> {
+  console.log(`[notifyUser] Attempting to send to ${telegramId}: ${text.slice(0, 50)}...`);
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) return;
+  if (!token) {
+    console.error('[notifyUser] TELEGRAM_BOT_TOKEN is missing');
+    return;
+  }
   try {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    const url = `https://api.telegram.org/bot${token}/sendMessage`;
+    const payload = { chat_id: String(telegramId), text };
+    console.log(`[notifyUser] Sending POST to ${url} with payload:`, payload);
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: String(telegramId), text }),
+      body: JSON.stringify(payload),
     });
-  } catch {
-    // notification failures must not fail the job
+    const responseText = await res.text();
+    console.log(`[notifyUser] Response status: ${res.status}, body: ${responseText}`);
+    if (!res.ok) {
+      console.error(`[notifyUser] Non-ok response: ${res.status} ${responseText}`);
+    }
+  } catch (err) {
+    console.error('[notifyUser] Error sending message:', err);
   }
 }
 
@@ -49,24 +61,39 @@ function buildUserMessage(r: WbPayoutResult): string {
 
 export async function handleReconcile(job: Job): Promise<void> {
   const runId = (job.payload as Record<string, string>)?.run_id ?? job.entity_id;
-  if (!runId) throw new Error('Missing run_id in job payload');
+  console.log(`[handleReconcile] Starting for runId: ${runId}`);
+  if (!runId) {
+    console.error('[handleReconcile] Missing run_id in job payload');
+    throw new Error('Missing run_id in job payload');
+  }
 
   const run = await findRunById(runId);
-  if (!run) throw new Error(`Reconciliation run not found: ${runId}`);
+  if (!run) {
+    console.error(`[handleReconcile] Run not found: ${runId}`);
+    throw new Error(`Reconciliation run not found: ${runId}`);
+  }
+  console.log(`[handleReconcile] Found run with status: ${run.status}`);
 
   // Idempotency
-  if (run.status === 'COMPLETED' || run.status === 'FAILED') return;
+  if (run.status === 'COMPLETED' || run.status === 'FAILED') {
+    console.log(`[handleReconcile] Run already ${run.status}, skipping.`);
+    return;
+  }
 
   const user = await findUserById(run.user_id);
+  console.log(`[handleReconcile] User found: ${user?.id}, telegram_id: ${user?.telegram_id}`);
   const bankImport = await findImportById(run.bank_import_id);
+  console.log(`[handleReconcile] Bank import quality: ${bankImport?.quality_status}`);
 
   try {
+    console.log(`[handleReconcile] Updating run to RUNNING...`);
     await updateRun(runId, { status: 'RUNNING', started_at: run.started_at ?? new Date() });
 
-    // Report-level reconciliation: aggregate WB net payout vs bank WB credits.
-    // (An empty candidate set is not a failure — see "missing"/UNMATCHED below.)
+    console.log(`[handleReconcile] Calling reconcileWbPayout...`);
     const result = await reconcileWbPayout(run);
+    console.log(`[handleReconcile] Reconcile result status: ${result.status}`);
 
+    console.log(`[handleReconcile] Updating run to COMPLETED...`);
     await updateRun(runId, {
       status: 'COMPLETED',
       completed_at: new Date(),
@@ -80,11 +107,12 @@ export async function handleReconcile(job: Job): Promise<void> {
       ambiguous_amount: result.ambiguousAmountKopeks,
     });
 
-    // Enqueue report export
+    console.log(`[handleReconcile] Enqueueing report export...`);
     await enqueue('report_export', runId, { run_id: runId });
 
     // Notify user
     if (user?.telegram_id) {
+      console.log(`[handleReconcile] Notifying user ${user.telegram_id}`);
       await notifyUser(user.telegram_id, buildUserMessage(result));
 
       if (bankImport?.quality_status === 'LOW_CONFIDENCE') {
@@ -98,9 +126,13 @@ export async function handleReconcile(job: Job): Promise<void> {
         user.telegram_id,
         `Для скачивания отчёта используйте /get_report ${runId}`,
       );
+      console.log(`[handleReconcile] Notifications sent.`);
+    } else {
+      console.warn(`[handleReconcile] No telegram_id for user ${run.user_id}, skipping notifications.`);
     }
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
+    console.error(`[handleReconcile] Error during reconciliation: ${reason}`);
     await updateRun(runId, {
       status: 'FAILED',
       failure_reason: reason,
