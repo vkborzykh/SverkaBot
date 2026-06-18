@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import { loadFile } from '@/src/lib/ingestion/storage';
 import type { Job } from '@/src/db/repositories/jobs';
 import { findImportById, updateImport } from '@/src/db/repositories/imports';
+import { findUserById } from '@/src/db/repositories/users'; // ← статический импорт
 import {
   createTransactions,
   type NewCanonicalTransaction,
@@ -21,33 +22,38 @@ const ROW_LIMIT = 50_000;
 // ── Telegram notification helper ─────────────────────────────────────────────
 
 async function notifyUser(telegramId: bigint, text: string): Promise<void> {
+  console.log(`[parseWb] notifyUser called for ${telegramId}, text: ${text.slice(0, 50)}...`);
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) return;
+  if (!token) {
+    console.error('[parseWb] TELEGRAM_BOT_TOKEN is missing');
+    return;
+  }
   try {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    const url = `https://api.telegram.org/bot${token}/sendMessage`;
+    const payload = { chat_id: String(telegramId), text };
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: String(telegramId), text }),
+      body: JSON.stringify(payload),
     });
-  } catch {
-    // notification failure must not fail the job
+    const responseText = await res.text();
+    console.log(`[parseWb] Telegram response: ${res.status} ${responseText}`);
+    if (!res.ok) {
+      console.error(`[parseWb] Non-ok response: ${res.status} ${responseText}`);
+    }
+  } catch (err) {
+    console.error('[parseWb] Error sending message:', err);
   }
 }
 
 // ── File loading ──────────────────────────────────────────────────────────────
 
 async function loadFileBuffer(storagePath: string): Promise<Buffer> {
-  // storagePath format: "imports/{userId}/{hash}.xlsx"
   return loadFile(storagePath);
 }
 
 // ── Header detection ─────────────────────────────────────────────────────────
 
-// Priority order matters. The real WB realization report has ~81 columns and
-// several "сумма…" columns. The payout column we must reconcile against is
-// "К перечислению Продавцу за реализованный товар" — but a naive "сумма" match
-// hits "Общая сумма штрафов" first. So we match the most specific payout/date
-// labels first and only fall back to generic ones.
 const DATE_PRIORITY = ['дата продажи', 'дата операции', 'дата заказа', 'дата', 'date'];
 const AMOUNT_PRIORITY = [
   'к перечислению продавцу за реализованный товар',
@@ -114,16 +120,13 @@ export async function handleParseWb(job: Job): Promise<void> {
   const imp = await findImportById(importId);
   if (!imp) throw new Error(`Import not found: ${importId}`);
 
-  // Idempotency: skip if already terminal
   if (imp.status === 'COMPLETED' || imp.status === 'FAILED') return;
 
-  // Obtain telegram_id for notification (via users repository inline)
-  const { findUserById } = await import('@/src/db/repositories/users');
   const user = await findUserById(imp.user_id);
+  console.log(`[parseWb] User found: ${user?.id}, telegram_id: ${user?.telegram_id}`);
 
   await updateImport(importId, { status: 'ANALYZING' });
 
-  // Load file
   let buffer: Buffer;
   try {
     buffer = await loadFileBuffer(imp.storage_path!);
@@ -136,7 +139,6 @@ export async function handleParseWb(job: Job): Promise<void> {
     return;
   }
 
-  // Parse XLSX
   let workbook: XLSX.WorkBook;
   try {
     workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false });
@@ -167,7 +169,6 @@ export async function handleParseWb(job: Job): Promise<void> {
     defval: null,
   });
 
-  // Skip fully-empty leading rows to find header
   let headerRowIdx = 0;
   while (
     headerRowIdx < rawRows.length &&
@@ -239,10 +240,9 @@ export async function handleParseWb(job: Job): Promise<void> {
 
   for (let i = 0; i < dataRows.length; i++) {
     const row = dataRows[i];
-    const rowNumber = i + 1; // 1-based, relative to data start
+    const rowNumber = i + 1;
     const rawFragment = JSON.stringify(row).slice(0, 200);
 
-    // Skip fully empty rows silently (don't count against quality).
     const isEmpty = row.every(
       (c) => c === null || c === undefined || String(c).trim() === '',
     );
@@ -262,12 +262,6 @@ export async function handleParseWb(job: Job): Promise<void> {
       continue;
     }
 
-    // Monetary components of this WB row:
-    //   payout (col 33, «К перечислению …»): > 0 → IN, < 0 → OUT (возврат)
-    // Net expected payout = Σ(IN) − Σ(OUT) ≈ Σ(col 33) netted for returns,
-    // which matches what WB actually transfers. (Other cost columns —
-    // логистика/хранение/штрафы/удержания — are informational in the MVP and
-    // are NOT separately subtracted; on real reports that double-counts.)
     const components: { amount: bigint; direction: 'IN' | 'OUT'; kind: string }[] = [];
 
     const rawPayout = row[colMap.amountCol];
@@ -293,7 +287,6 @@ export async function handleParseWb(job: Job): Promise<void> {
       }
     }
 
-    // A valid row with no monetary effect still counts as processed.
     if (components.length === 0) {
       processedRows++;
       continue;
@@ -342,7 +335,6 @@ export async function handleParseWb(job: Job): Promise<void> {
     successDates.push(txDate);
   }
 
-  // Batch-insert in chunks to avoid huge single queries
   const CHUNK = 500;
   for (let i = 0; i < transactions.length; i += CHUNK) {
     await createTransactions(transactions.slice(i, i + CHUNK));
