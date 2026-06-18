@@ -200,6 +200,7 @@ function parseCsvRaw(buffer: Buffer): unknown[][] {
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 export async function handleParseBank(job: Job): Promise<void> {
+  console.time('[parseBank] total');
   const importId = (job.payload as Record<string, string>)?.import_id ?? job.entity_id;
   if (!importId) throw new Error('Missing import_id in job payload');
 
@@ -213,6 +214,7 @@ export async function handleParseBank(job: Job): Promise<void> {
 
   await updateImport(importId, { status: 'ANALYZING' });
 
+  console.time('[parseBank] loadFile');
   let buffer: Buffer;
   try {
     buffer = await loadFileBuffer(imp.storage_path!);
@@ -224,11 +226,13 @@ export async function handleParseBank(job: Job): Promise<void> {
     }
     return;
   }
+  console.timeEnd('[parseBank] loadFile');
 
   const ext = (imp.original_filename ?? imp.storage_path ?? '').toLowerCase().endsWith('.csv')
     ? 'csv'
     : 'xlsx';
 
+  console.time('[parseBank] detectHeaderAndColumns');
   let detection: HeaderDetectionResult | null;
   try {
     detection = await detectHeaderAndColumns(buffer, ext as 'csv' | 'xlsx');
@@ -243,6 +247,7 @@ export async function handleParseBank(job: Job): Promise<void> {
     }
     return;
   }
+  console.timeEnd('[parseBank] detectHeaderAndColumns');
 
   if (!detection) {
     await updateImport(importId, { status: 'FAILED', failure_reason: 'NO_HEADER_DETECTED' });
@@ -255,7 +260,9 @@ export async function handleParseBank(job: Job): Promise<void> {
     return;
   }
 
+  console.time('[parseBank] resolveProfile');
   const resolveResult = await resolveProfile(detection, detection.signature, imp.user_id);
+  console.timeEnd('[parseBank] resolveProfile');
 
   let activeProfileId: string;
   let profileConfidence: number;
@@ -289,8 +296,10 @@ export async function handleParseBank(job: Job): Promise<void> {
     profile_confidence: String(profileConfidence.toFixed(4)),
   });
 
+  console.time('[parseBank] parseRawRows');
   const rawRows = ext === 'csv' ? parseCsvRaw(buffer) : parseXlsxRaw(buffer);
   const { headerRow, dataRows } = extractRows(rawRows, detection.headerRowIndex);
+  console.timeEnd('[parseBank] parseRawRows');
 
   if (dataRows.length === 0) {
     await updateImport(importId, {
@@ -335,6 +344,7 @@ export async function handleParseBank(job: Job): Promise<void> {
     }
   }
 
+  console.time('[parseBank] processRows');
   const transactions: NewCanonicalTransaction[] = [];
   const errors: NewParsingError[] = [];
   const successDates: Date[] = [];
@@ -443,12 +453,15 @@ export async function handleParseBank(job: Job): Promise<void> {
 
     successDates.push(txDate);
   }
+  console.timeEnd('[parseBank] processRows');
 
+  console.time('[parseBank] insertTransactions');
   const CHUNK = 500;
   for (let i = 0; i < transactions.length; i += CHUNK) {
     await createTransactions(transactions.slice(i, i + CHUNK));
   }
   await createParsingErrors(errors);
+  console.timeEnd('[parseBank] insertTransactions');
 
   const totalRows = dataRows.length;
   const successRows = transactions.length;
@@ -475,6 +488,7 @@ export async function handleParseBank(job: Job): Promise<void> {
     periodEnd = sorted[sorted.length - 1].toISOString().slice(0, 10);
   }
 
+  console.time('[parseBank] updateImport');
   await updateImport(importId, {
     status: 'COMPLETED',
     quality_status: qualityStatus,
@@ -485,11 +499,14 @@ export async function handleParseBank(job: Job): Promise<void> {
     parser_version: PARSER_VERSION,
     failure_reason: null,
   });
+  console.timeEnd('[parseBank] updateImport');
 
+  // updateProfileStats — fire-and-forget, не ждём
   updateProfileStats(activeProfileId).catch(() => {});
 
   // Notify user
   if (user?.telegram_id) {
+    console.time('[parseBank] notifications');
     if (qualityStatus === 'MANUAL_REVIEW') {
       await notifyUser(
         user.telegram_id,
@@ -513,5 +530,8 @@ export async function handleParseBank(job: Job): Promise<void> {
       );
     }
     await notifyUser(user.telegram_id, 'Готово. Теперь можно запустить сверку.');
+    console.timeEnd('[parseBank] notifications');
   }
+
+  console.timeEnd('[parseBank] total');
 }
