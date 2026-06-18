@@ -33,16 +33,27 @@ const ROW_LIMIT = 50_000;
 // ── Telegram notification helper ──────────────────────────────────────────────
 
 async function notifyUser(telegramId: bigint, text: string): Promise<void> {
+  console.log(`[parseBank] notifyUser called for ${telegramId}, text: ${text.slice(0, 50)}...`);
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) return;
+  if (!token) {
+    console.error('[parseBank] TELEGRAM_BOT_TOKEN is missing');
+    return;
+  }
   try {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    const url = `https://api.telegram.org/bot${token}/sendMessage`;
+    const payload = { chat_id: String(telegramId), text };
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: String(telegramId), text }),
+      body: JSON.stringify(payload),
     });
-  } catch {
-    // notification failures must not fail the job
+    const responseText = await res.text();
+    console.log(`[parseBank] Telegram response: ${res.status} ${responseText}`);
+    if (!res.ok) {
+      console.error(`[parseBank] Non-ok response: ${res.status} ${responseText}`);
+    }
+  } catch (err) {
+    console.error('[parseBank] Error sending message:', err);
   }
 }
 
@@ -81,8 +92,8 @@ function resolveColIndex(
 interface ResolvedCols {
   dateIdx: number;
   amountIdx: number | null;
-  outIdx: number | null; // Дебет / списание / расход  -> OUT
-  inIdx: number | null; // Кредит / поступление / приход -> IN
+  outIdx: number | null;
+  inIdx: number | null;
   descIdx: number | null;
   cpIdx: number | null;
   refIdx: number | null;
@@ -97,11 +108,6 @@ function resolveColumns(mapping: ColumnMapping, headerRow: unknown[]): ResolvedC
   const cpIdx = resolveColIndex(mapping.counterpartyColumn, headerRow);
   const refIdx = resolveColIndex(mapping.referenceColumn, headerRow);
 
-  // Detect separate debit/credit columns in the header.
-  // From the account holder's perspective on a расчётный счёт:
-  //   Дебет  = списание со счёта   -> OUT
-  //   Кредит = поступление на счёт -> IN
-  // (WB payouts are incoming -> they land in the Кредит/IN column.)
   const lowerHeaders = headerRow.map((h) =>
     typeof h === 'string' ? h.toLowerCase() : '',
   );
@@ -138,12 +144,10 @@ function extractSplitAmount(
     }
   };
 
-  // Дебет column filled -> списание -> OUT
   const outAmt = tryAmt(row[outIdx]);
   if (outAmt !== null) {
     return { amount: outAmt < BigInt(0) ? -outAmt : outAmt, direction: 'OUT' };
   }
-  // Кредит column filled -> поступление -> IN
   const inAmt = tryAmt(row[inIdx]);
   if (inAmt !== null) {
     return { amount: inAmt < BigInt(0) ? -inAmt : inAmt, direction: 'IN' };
@@ -202,14 +206,13 @@ export async function handleParseBank(job: Job): Promise<void> {
   const imp = await findImportById(importId);
   if (!imp) throw new Error(`Import not found: ${importId}`);
 
-  // Idempotency
   if (imp.status === 'COMPLETED' || imp.status === 'FAILED') return;
 
   const user = await findUserById(imp.user_id);
+  console.log(`[parseBank] User found: ${user?.id}, telegram_id: ${user?.telegram_id}`);
 
   await updateImport(importId, { status: 'ANALYZING' });
 
-  // Load file
   let buffer: Buffer;
   try {
     buffer = await loadFileBuffer(imp.storage_path!);
@@ -222,12 +225,10 @@ export async function handleParseBank(job: Job): Promise<void> {
     return;
   }
 
-  // Detect file type
   const ext = (imp.original_filename ?? imp.storage_path ?? '').toLowerCase().endsWith('.csv')
     ? 'csv'
     : 'xlsx';
 
-  // Run header detection
   let detection: HeaderDetectionResult | null;
   try {
     detection = await detectHeaderAndColumns(buffer, ext as 'csv' | 'xlsx');
@@ -254,7 +255,6 @@ export async function handleParseBank(job: Job): Promise<void> {
     return;
   }
 
-  // Profile resolution
   const resolveResult = await resolveProfile(detection, detection.signature, imp.user_id);
 
   let activeProfileId: string;
@@ -274,7 +274,6 @@ export async function handleParseBank(job: Job): Promise<void> {
     profileStatus = 'DRAFT';
   }
 
-  // Use stored profile mapping for MATCHED, otherwise use detection
   let effectiveMapping: ColumnMapping = detection.columnMapping;
   if (profileStatus === 'MATCHED') {
     const profile = await findProfileById(activeProfileId);
@@ -290,7 +289,6 @@ export async function handleParseBank(job: Job): Promise<void> {
     profile_confidence: String(profileConfidence.toFixed(4)),
   });
 
-  // Parse raw rows
   const rawRows = ext === 'csv' ? parseCsvRaw(buffer) : parseXlsxRaw(buffer);
   const { headerRow, dataRows } = extractRows(rawRows, detection.headerRowIndex);
 
@@ -316,7 +314,6 @@ export async function handleParseBank(job: Job): Promise<void> {
     return;
   }
 
-  // Resolve column indices
   let cols: ResolvedCols;
   try {
     cols = resolveColumns(effectiveMapping, headerRow);
@@ -338,7 +335,6 @@ export async function handleParseBank(job: Job): Promise<void> {
     }
   }
 
-  // Parse rows
   const transactions: NewCanonicalTransaction[] = [];
   const errors: NewParsingError[] = [];
   const successDates: Date[] = [];
@@ -448,14 +444,12 @@ export async function handleParseBank(job: Job): Promise<void> {
     successDates.push(txDate);
   }
 
-  // Batch insert
   const CHUNK = 500;
   for (let i = 0; i < transactions.length; i += CHUNK) {
     await createTransactions(transactions.slice(i, i + CHUNK));
   }
   await createParsingErrors(errors);
 
-  // Compute metrics
   const totalRows = dataRows.length;
   const successRows = transactions.length;
   const errorCount = errors.length;
@@ -492,10 +486,9 @@ export async function handleParseBank(job: Job): Promise<void> {
     failure_reason: null,
   });
 
-  // Update profile stats asynchronously (fire-and-forget)
   updateProfileStats(activeProfileId).catch(() => {});
 
-  // Notify user (User_Flow_2_3.md Flow 3 messages)
+  // Notify user
   if (user?.telegram_id) {
     if (qualityStatus === 'MANUAL_REVIEW') {
       await notifyUser(
