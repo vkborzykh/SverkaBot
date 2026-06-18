@@ -29,11 +29,12 @@ import { getSetting } from '@/src/lib/settings/settings';
 
 const PARSER_VERSION = 'bank_v1';
 const ROW_LIMIT = 50_000;
+const INSERT_CHUNK = 5000; // увеличен с 500 для ускорения вставки
 
 // ── Telegram notification helper ──────────────────────────────────────────────
 
 async function notifyUser(telegramId: bigint, text: string): Promise<void> {
-  console.log(`[parseBank] notifyUser called for ${telegramId}, text: ${text.slice(0, 50)}...`);
+  console.log(`[parseBank] notifyUser called for ${telegramId}, text length: ${text.length}`);
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
     console.error('[parseBank] TELEGRAM_BOT_TOKEN is missing');
@@ -46,9 +47,10 @@ async function notifyUser(telegramId: bigint, text: string): Promise<void> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(30000), // 30 секунд на ответ
     });
     const responseText = await res.text();
-    console.log(`[parseBank] Telegram response: ${res.status} ${responseText}`);
+    console.log(`[parseBank] Telegram response: ${res.status}`);
     if (!res.ok) {
       console.error(`[parseBank] Non-ok response: ${res.status} ${responseText}`);
     }
@@ -456,9 +458,8 @@ export async function handleParseBank(job: Job): Promise<void> {
   console.timeEnd('[parseBank] processRows');
 
   console.time('[parseBank] insertTransactions');
-  const CHUNK = 500;
-  for (let i = 0; i < transactions.length; i += CHUNK) {
-    await createTransactions(transactions.slice(i, i + CHUNK));
+  for (let i = 0; i < transactions.length; i += INSERT_CHUNK) {
+    await createTransactions(transactions.slice(i, i + INSERT_CHUNK));
   }
   await createParsingErrors(errors);
   console.timeEnd('[parseBank] insertTransactions');
@@ -504,33 +505,26 @@ export async function handleParseBank(job: Job): Promise<void> {
   // updateProfileStats — fire-and-forget, не ждём
   updateProfileStats(activeProfileId).catch(() => {});
 
-  // Notify user
+  // ── ОТПРАВКА УВЕДОМЛЕНИЙ: объединяем в одно сообщение ──
   if (user?.telegram_id) {
-    console.time('[parseBank] notifications');
+    console.time('[parseBank] buildNotification');
+    let message = '';
     if (qualityStatus === 'MANUAL_REVIEW') {
-      await notifyUser(
-        user.telegram_id,
-        `⚠️ Файл обработан, но значительная часть строк не распознана (ошибок: ${errorCount}). Результаты сверки могут быть неполными. Мы проверим формат вашей выписки.`,
-      );
+      message = `⚠️ Файл обработан, но значительная часть строк не распознана (ошибок: ${errorCount}). Результаты сверки могут быть неполными. Мы проверим формат вашей выписки.`;
     } else if (profileStatus === 'MATCHED') {
-      await notifyUser(
-        user.telegram_id,
-        `✅ Выписка обработана. Использован профиль банка: «${profileDisplayName}». Распознано строк: ${successRows}, ошибок: ${errorCount}.`,
-      );
+      message = `✅ Выписка обработана. Использован профиль банка: «${profileDisplayName}». Распознано строк: ${successRows}, ошибок: ${errorCount}.`;
       if (qualityStatus === 'LOW_CONFIDENCE') {
-        await notifyUser(
-          user.telegram_id,
-          '⚠️ Выписка была распознана с низкой уверенностью. Результаты сверки могут быть неточны.',
-        );
+        message += '\n\n⚠️ Выписка была распознана с низкой уверенностью. Результаты сверки могут быть неточны.';
       }
     } else {
-      await notifyUser(
-        user.telegram_id,
-        '⚠️ Выписка обработана, но структура банка новая. Создан черновик профиля. Точность распознавания может быть ниже. Рекомендуем проверить отчёт.',
-      );
+      message = `⚠️ Выписка обработана, но структура банка новая. Создан черновик профиля. Точность распознавания может быть ниже. Рекомендуем проверить отчёт.`;
     }
-    await notifyUser(user.telegram_id, 'Готово. Теперь можно запустить сверку.');
-    console.timeEnd('[parseBank] notifications');
+    message += '\n\nГотово. Теперь можно запустить сверку.';
+    console.timeEnd('[parseBank] buildNotification');
+
+    console.time('[parseBank] notifyUser');
+    await notifyUser(user.telegram_id, message);
+    console.timeEnd('[parseBank] notifyUser');
   }
 
   console.timeEnd('[parseBank] total');
