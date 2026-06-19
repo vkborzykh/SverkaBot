@@ -105,6 +105,18 @@ export function computeWbPayout(
   const ratio = 1 - Number(abs(discrepancy)) / Number(denom);
   const finalScore = Math.max(0, Math.min(1, reconciled ? Math.max(ratio, 0.95) : Math.max(ratio, 0)));
 
+  // ── Исправленный расчёт matchRate ──
+  let matchRate: number;
+  if (status === 'reconciled' || status === 'overpaid') {
+    matchRate = 100;
+  } else if (status === 'missing') {
+    matchRate = 0;
+  } else { // underpaid
+    matchRate = expectedNet > BigInt(0) ? (Number(received) / Number(expectedNet)) * 100 : 0;
+    // Округляем до двух знаков, чтобы избежать погрешностей
+    matchRate = Math.round(matchRate * 100) / 100;
+  }
+
   return {
     status,
     matchType,
@@ -122,7 +134,7 @@ export function computeWbPayout(
     combinedCount,
     unmatchedAmountKopeks: unmatchedAmount,
     ambiguousAmountKopeks: BigInt(0),
-    matchRate: reconciled || status === 'overpaid' ? 100 : 0,
+    matchRate,
     wbPayoutTxIds: wbTxs.filter((t) => t.direction === 'IN').map((t) => t.id),
     bankCreditTxIds: bankCredits.map((t) => t.id),
   };
