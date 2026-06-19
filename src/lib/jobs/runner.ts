@@ -14,42 +14,44 @@ import { handleFileCleanup } from '@/src/lib/jobs/handlers/fileCleanup';
 
 const BATCH_SIZE = 3;
 const MAX_RETRIES = 3;
-// One drain may clear several batches so a single trigger (or the daily cron)
-// can work through a backlog instead of leaving jobs behind.
 const MAX_BATCHES_PER_DRAIN = 10;
 
 type JobPayload = Record<string, unknown> & { next_attempt_at?: string };
 
 function backoffMs(retries: number): number {
-  // 30s, 120s, 480s
   return 30_000 * Math.pow(4, retries);
 }
 
 async function claimPendingJobs(): Promise<Job[]> {
+  console.log('[claimPendingJobs] starting...');
   const db = getDb();
-  // FOR UPDATE SKIP LOCKED makes concurrent drains safe: two invocations
-  // (e.g. the upload's waitUntil kick and the daily cron) never grab the
-  // same row, so jobs are processed exactly once.
-  const rows = await db.execute(sql`
-    UPDATE jobs
-    SET status = 'RUNNING', started_at = NOW()
-    WHERE id IN (
-      SELECT id FROM jobs
-      WHERE status = 'PENDING'
-        AND (
-          payload->>'next_attempt_at' IS NULL
-          OR (payload->>'next_attempt_at')::timestamptz <= NOW()
-        )
-      ORDER BY created_at ASC
-      LIMIT ${BATCH_SIZE}
-      FOR UPDATE SKIP LOCKED
-    )
-    RETURNING *
-  `);
-  return rows as unknown as Job[];
+  try {
+    const rows = await db.execute(sql`
+      UPDATE jobs
+      SET status = 'RUNNING', started_at = NOW()
+      WHERE id IN (
+        SELECT id FROM jobs
+        WHERE status = 'PENDING'
+          AND (
+            payload->>'next_attempt_at' IS NULL
+            OR (payload->>'next_attempt_at')::timestamptz <= NOW()
+          )
+        ORDER BY created_at ASC
+        LIMIT ${BATCH_SIZE}
+        FOR UPDATE SKIP LOCKED
+      )
+      RETURNING *
+    `);
+    console.log(`[claimPendingJobs] claimed ${rows.length} jobs`);
+    return rows as unknown as Job[];
+  } catch (err) {
+    console.error('[claimPendingJobs] error:', err);
+    throw err;
+  }
 }
 
 function dispatch(job: Job): Promise<void> {
+  console.log(`[dispatch] dispatching job ${job.id} of type ${job.job_type}`);
   switch (job.job_type) {
     case 'parse_wb':
       return handleParseWb(job);
@@ -70,9 +72,6 @@ function dispatch(job: Job): Promise<void> {
   }
 }
 
-// Best-effort: if a job throws all the way out (handlers usually notify on
-// their own caught errors, so this only fires on truly unexpected failures),
-// tell the user so the bot is never silent.
 async function notifyFailure(job: Job): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return;
@@ -107,18 +106,22 @@ async function notifyFailure(job: Job): Promise<void> {
 }
 
 async function processBatch(claimed: Job[]): Promise<void> {
+  console.log(`[processBatch] processing ${claimed.length} jobs`);
   await Promise.all(
     claimed.map(async (job) => {
       try {
+        console.log(`[processBatch] starting job ${job.id}`);
         await dispatch(job);
         await updateJob(job.id, {
           status: 'DONE',
           completed_at: new Date(),
           last_error: null,
         });
+        console.log(`[processBatch] job ${job.id} completed successfully`);
       } catch (err) {
         const currentRetries = (job.retries ?? 0) + 1;
         const message = err instanceof Error ? err.message : String(err);
+        console.error(`[processBatch] job ${job.id} failed: ${message}`);
 
         if (currentRetries >= MAX_RETRIES) {
           await updateJob(job.id, {
@@ -137,24 +140,27 @@ async function processBatch(claimed: Job[]): Promise<void> {
             last_error: message,
             payload: { ...existingPayload, next_attempt_at: nextAttemptAt.toISOString() },
           });
+          console.log(`[processBatch] job ${job.id} rescheduled for ${nextAttemptAt.toISOString()}`);
         }
       }
     }),
   );
 }
 
-/**
- * Drain the job queue in-process (no self-HTTP call). Safe to invoke
- * concurrently thanks to FOR UPDATE SKIP LOCKED. Returns the number of
- * jobs handled in this call.
- */
 export async function drainQueue(): Promise<number> {
+  console.log('[drainQueue] started');
   let handled = 0;
   for (let i = 0; i < MAX_BATCHES_PER_DRAIN; i++) {
+    console.log(`[drainQueue] batch ${i+1}`);
     const claimed = await claimPendingJobs();
-    if (claimed.length === 0) break;
+    if (claimed.length === 0) {
+      console.log('[drainQueue] no jobs claimed, stopping');
+      break;
+    }
     await processBatch(claimed);
     handled += claimed.length;
+    console.log(`[drainQueue] handled ${handled} so far`);
   }
+  console.log(`[drainQueue] finished, total handled: ${handled}`);
   return handled;
 }
