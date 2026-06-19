@@ -1,6 +1,4 @@
 import { createJob } from '@/src/db/repositories/jobs';
-import { drainQueue } from '@/src/lib/jobs/runner';
-import { runBackground } from '@/src/lib/jobs/background';
 
 export type JobType =
   | 'parse_wb'
@@ -27,14 +25,6 @@ export async function enqueue(
     payload,
   });
   console.log('[enqueue] job created:', job);
-
-  // Process the queue in-process, kept alive past the HTTP response via
-  // waitUntil. No self-HTTP call (which was being killed on serverless),
-  // and the just-created job runs in the SAME invocation that wrote the
-  // upload to local storage — so the parser can read it before /tmp is
-  // recycled. The daily cron is the long-tail fallback for retries.
-  console.log('[enqueue] triggering drainQueue in background');
-  runBackground(drainQueue());
-
+  // No immediate background execution — rely on cron-job.org to call /api/jobs/process
   return job.id;
 }
