@@ -32,7 +32,8 @@ export const msg = {
   // ── Bank upload ───────────────────────────────────────────────────────────────
   uploadBankPrompt:
     'Пришлите выписку в формате CSV или XLSX. Размер не более 20 МБ. Мы автоматически определим структуру вашего банка.',
-  uploadBankReceived: 'Файл принят, анализирую структуру...',
+  uploadBankReceived: (importId: string) =>
+    `Файл принят, анализирую структуру... Статус выписки можно проверить командой /status ${importId}.`,
   uploadBankMatchedProfile: (profileName: string, rows: number, errors: number) =>
     `✅ Выписка обработана. Использован профиль банка: «${profileName}». Распознано строк: ${rows}, ошибок: ${errors}.`,
   uploadBankDraftProfile:
@@ -49,7 +50,7 @@ export const msg = {
   syncPeriodMismatch:
     'Периоды отчёта WB и выписки банка не совпадают. Загрузите файлы за один период.',
   syncStarted: (runId: string) =>
-    `Сверка запущена (ID: ${runId}). Обычно занимает до минуты. Статус: /sync_status ${runId}.`,
+    `Сверка запущена. Обычно занимает до минуты. Статус: /sync_status ${runId}.`,
   syncCompleted: (matched: number, unmatched: number, ambiguous: number, lossRub: string) =>
     `✅ Сверка завершена. Совпадений: ${matched}. Не найдено: ${unmatched}. Неоднозначно: ${ambiguous}. Оценка возможных потерь: ${lossRub} ₽.`,
   syncLowConfidenceWarning:
