@@ -36,7 +36,7 @@ function esc(s: string): string {
 const STATUS_META: Record<HtmlReportData['status'], { label: string; accent: string; note: string }> = {
   reconciled: { label: 'Расхождений не найдено', accent: '#1a7f5a', note: 'Сумма поступлений совпала с ожидаемой выплатой.' },
   overpaid: { label: 'Поступило больше ожидаемого', accent: '#1a7f5a', note: 'На счёт пришло больше, чем ожидалось по отчёту WB.' },
-  underpaid: { label: 'Возможная недоплата', accent: '#b06d00', note: 'Поступило меньше ожидаемого. Проверьте расхождение.' },
+  underpaid: { label: 'Возможная недоплата', accent: '#e67e22', note: 'Поступило меньше ожидаемого. Проверьте расхождение.' },
   missing: { label: 'Выплата не найдена', accent: '#b3261e', note: 'Поступлений от Wildberries за период не обнаружено.' },
 };
 
@@ -49,9 +49,12 @@ export function buildHtmlReport(data: HtmlReportData): string {
   const recW = Math.round((rec / scale) * 100);
   const lossW = Math.max(0, expW - recW);
 
-  const claimSection =
-    data.claimRows.length > 0
-      ? `
+  const hasLoss = data.lossKopeks > BigInt(0);
+  const showClaimTable = hasLoss && data.claimRows.length > 0;
+
+  let claimSection: string;
+  if (showClaimTable) {
+    claimSection = `
     <h2>Данные для претензии</h2>
     <p class="muted">Выплаты Wildberries из отчёта за период — приложите к обращению на маркетплейс.</p>
     <table>
@@ -66,8 +69,10 @@ export function buildHtmlReport(data: HtmlReportData): string {
           )
           .join('\n        ')}
       </tbody>
-    </table>`
-      : '';
+    </table>`;
+  } else {
+    claimSection = `<p class="muted">Все выплаты подтверждены. Данные для претензии отсутствуют.</p>`;
+  }
 
   return `<!doctype html>
 <html lang="ru">
@@ -91,7 +96,7 @@ export function buildHtmlReport(data: HtmlReportData): string {
   .fig { flex:1 1 30%; min-width:150px; border:1px solid #e6e6ea; border-radius:12px; padding:14px 16px; }
   .fig .k { color:#6b6b72; font-size:13px; }
   .fig .v { font-size:22px; font-weight:650; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; margin-top:2px; }
-  .fig.loss .v { color:${data.lossKopeks > BigInt(0) ? '#b3261e' : '#1a7f5a'}; }
+  .fig.loss .v { color:${hasLoss ? '#b3261e' : '#1a7f5a'}; }
   .bars { margin:22px 0 6px; }
   .barrow { display:flex; align-items:center; gap:12px; margin:10px 0; }
   .barrow .lbl { width:96px; color:#6b6b72; font-size:13px; }
@@ -134,7 +139,7 @@ export function buildHtmlReport(data: HtmlReportData): string {
         <div class="track"><div class="seg-rec" style="width:${recW}%"></div><div class="seg-loss" style="width:${lossW}%"></div></div>
         <span class="amt">${rub(data.receivedKopeks)}</span></div>
     </div>
-    <p class="muted">Процент совпадения: ${data.matchRate.toFixed(0)}%. Красной штриховкой показан недостающий объём.</p>
+    <p class="muted">Процент совпадения: ${data.matchRate.toFixed(1)}%. Красной штриховкой показан недостающий объём.</p>
 
     ${claimSection}
 
