@@ -2,7 +2,7 @@ import * as XLSX from 'xlsx';
 import { loadFile } from '@/src/lib/ingestion/storage';
 import type { Job } from '@/src/db/repositories/jobs';
 import { findImportById, updateImport } from '@/src/db/repositories/imports';
-import { findUserById } from '@/src/db/repositories/users'; // ← статический импорт
+import { findUserById } from '@/src/db/repositories/users';
 import {
   createTransactions,
   type NewCanonicalTransaction,
@@ -18,11 +18,12 @@ import { sha256 } from '@/src/lib/ingestion/hash';
 
 const PARSER_VERSION = 'wb_v1';
 const ROW_LIMIT = 50_000;
+const INSERT_CHUNK = 2000; // увеличен
 
 // ── Telegram notification helper ─────────────────────────────────────────────
 
 async function notifyUser(telegramId: bigint, text: string): Promise<void> {
-  console.log(`[parseWb] notifyUser called for ${telegramId}, text: ${text.slice(0, 50)}...`);
+  console.log(`[parseWb] notifyUser called for ${telegramId}, text length: ${text.length}`);
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
     console.error('[parseWb] TELEGRAM_BOT_TOKEN is missing');
@@ -35,9 +36,10 @@ async function notifyUser(telegramId: bigint, text: string): Promise<void> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(30000), // 30 сек
     });
     const responseText = await res.text();
-    console.log(`[parseWb] Telegram response: ${res.status} ${responseText}`);
+    console.log(`[parseWb] Telegram response: ${res.status}`);
     if (!res.ok) {
       console.error(`[parseWb] Non-ok response: ${res.status} ${responseText}`);
     }
@@ -114,6 +116,7 @@ function detectColumns(headers: unknown[]): ColumnMap {
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 export async function handleParseWb(job: Job): Promise<void> {
+  console.time('[parseWb] total');
   const importId = (job.payload as Record<string, string>)?.import_id ?? job.entity_id;
   if (!importId) throw new Error('Missing import_id in job payload');
 
@@ -127,6 +130,7 @@ export async function handleParseWb(job: Job): Promise<void> {
 
   await updateImport(importId, { status: 'ANALYZING' });
 
+  console.time('[parseWb] loadFile');
   let buffer: Buffer;
   try {
     buffer = await loadFileBuffer(imp.storage_path!);
@@ -138,6 +142,7 @@ export async function handleParseWb(job: Job): Promise<void> {
     }
     return;
   }
+  console.timeEnd('[parseWb] loadFile');
 
   let workbook: XLSX.WorkBook;
   try {
@@ -217,10 +222,7 @@ export async function handleParseWb(job: Job): Promise<void> {
   }
 
   if (dataRows.length > ROW_LIMIT) {
-    await updateImport(importId, {
-      status: 'FAILED',
-      failure_reason: 'ROW_LIMIT_EXCEEDED',
-    });
+    await updateImport(importId, { status: 'FAILED', failure_reason: 'ROW_LIMIT_EXCEEDED' });
     if (user?.telegram_id) {
       await notifyUser(
         user.telegram_id,
@@ -232,6 +234,7 @@ export async function handleParseWb(job: Job): Promise<void> {
 
   await updateImport(importId, { status: 'PARSING' });
 
+  console.time('[parseWb] processRows');
   const transactions: NewCanonicalTransaction[] = [];
   const errors: NewParsingError[] = [];
   const successDates: Date[] = [];
@@ -334,12 +337,14 @@ export async function handleParseWb(job: Job): Promise<void> {
     processedRows++;
     successDates.push(txDate);
   }
+  console.timeEnd('[parseWb] processRows');
 
-  const CHUNK = 500;
-  for (let i = 0; i < transactions.length; i += CHUNK) {
-    await createTransactions(transactions.slice(i, i + CHUNK));
+  console.time('[parseWb] insertTransactions');
+  for (let i = 0; i < transactions.length; i += INSERT_CHUNK) {
+    await createTransactions(transactions.slice(i, i + INSERT_CHUNK));
   }
   await createParsingErrors(errors);
+  console.timeEnd('[parseWb] insertTransactions');
 
   const totalRows = dataRows.length;
   const successRows = processedRows;
@@ -361,6 +366,7 @@ export async function handleParseWb(job: Job): Promise<void> {
     periodEnd = sorted[sorted.length - 1].toISOString().slice(0, 10);
   }
 
+  console.time('[parseWb] updateImport');
   await updateImport(importId, {
     status: 'COMPLETED',
     quality_status: qualityStatus,
@@ -371,17 +377,21 @@ export async function handleParseWb(job: Job): Promise<void> {
     parser_version: PARSER_VERSION,
     failure_reason: null,
   });
+  console.timeEnd('[parseWb] updateImport');
 
-  // Notify user
+  // ── ОТПРАВКА УВЕДОМЛЕНИЙ: объединяем в одно сообщение ──
   if (user?.telegram_id) {
-    const text = `✅ Отчёт WB обработан. Загружено строк: ${successRows}, ошибок: ${errorCount}. Теперь можно загрузить выписку банка.`;
-    await notifyUser(user.telegram_id, text);
-
+    console.time('[parseWb] buildNotification');
+    let message = `✅ Отчёт WB обработан. Загружено строк: ${successRows}, ошибок: ${errorCount}. Теперь можно загрузить выписку банка.`;
     if (qualityStatus === 'MANUAL_REVIEW') {
-      await notifyUser(
-        user.telegram_id,
-        `⚠️ Файл обработан, но значительная часть строк не распознана (ошибок: ${errorCount}). Результаты сверки могут быть неполными. Мы проверим формат вашей выписки.`,
-      );
+      message += `\n\n⚠️ Файл обработан, но значительная часть строк не распознана (ошибок: ${errorCount}). Результаты сверки могут быть неполными. Мы проверим формат вашей выписки.`;
     }
+    console.timeEnd('[parseWb] buildNotification');
+
+    console.time('[parseWb] notifyUser');
+    await notifyUser(user.telegram_id, message);
+    console.timeEnd('[parseWb] notifyUser');
   }
+
+  console.timeEnd('[parseWb] total');
 }
