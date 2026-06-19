@@ -18,7 +18,7 @@ import { sha256 } from '@/src/lib/ingestion/hash';
 
 const PARSER_VERSION = 'wb_v1';
 const ROW_LIMIT = 50_000;
-const INSERT_CHUNK = 2000; // увеличен
+const INSERT_CHUNK = 2000;
 
 // ── Telegram notification helper ─────────────────────────────────────────────
 
@@ -36,7 +36,7 @@ async function notifyUser(telegramId: bigint, text: string): Promise<void> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(30000), // 30 сек
+      signal: AbortSignal.timeout(30000),
     });
     const responseText = await res.text();
     console.log(`[parseWb] Telegram response: ${res.status}`);
@@ -138,7 +138,7 @@ export async function handleParseWb(job: Job): Promise<void> {
     const reason = `File not accessible: ${err instanceof Error ? err.message : String(err)}`;
     await updateImport(importId, { status: 'FAILED', failure_reason: reason });
     if (user?.telegram_id) {
-      await notifyUser(user.telegram_id, '❌ Не удалось прочитать файл отчёта WB.');
+      notifyUser(user.telegram_id, '❌ Не удалось прочитать файл отчёта WB.').catch(console.error);
     }
     return;
   }
@@ -151,7 +151,7 @@ export async function handleParseWb(job: Job): Promise<void> {
     const reason = `XLSX parse failed: ${err instanceof Error ? err.message : String(err)}`;
     await updateImport(importId, { status: 'FAILED', failure_reason: reason });
     if (user?.telegram_id) {
-      await notifyUser(user.telegram_id, '❌ Не удалось распознать файл отчёта WB. Пришлите корректный XLSX.');
+      notifyUser(user.telegram_id, '❌ Не удалось распознать файл отчёта WB. Пришлите корректный XLSX.').catch(console.error);
     }
     return;
   }
@@ -164,7 +164,7 @@ export async function handleParseWb(job: Job): Promise<void> {
       failure_reason: 'Empty workbook: no sheets found',
     });
     if (user?.telegram_id) {
-      await notifyUser(user.telegram_id, '❌ Файл WB пуст. Пришлите корректный отчёт.');
+      notifyUser(user.telegram_id, '❌ Файл WB пуст. Пришлите корректный отчёт.').catch(console.error);
     }
     return;
   }
@@ -188,7 +188,7 @@ export async function handleParseWb(job: Job): Promise<void> {
       failure_reason: 'No data rows found',
     });
     if (user?.telegram_id) {
-      await notifyUser(user.telegram_id, '❌ Файл WB не содержит данных.');
+      notifyUser(user.telegram_id, '❌ Файл WB не содержит данных.').catch(console.error);
     }
     return;
   }
@@ -201,7 +201,7 @@ export async function handleParseWb(job: Job): Promise<void> {
     const reason = `Header detection failed: ${err instanceof Error ? err.message : String(err)}`;
     await updateImport(importId, { status: 'FAILED', failure_reason: reason });
     if (user?.telegram_id) {
-      await notifyUser(user.telegram_id, '❌ Не удалось определить структуру отчёта WB.');
+      notifyUser(user.telegram_id, '❌ Не удалось определить структуру отчёта WB.').catch(console.error);
     }
     return;
   }
@@ -216,7 +216,7 @@ export async function handleParseWb(job: Job): Promise<void> {
       failure_reason: 'No data rows after header',
     });
     if (user?.telegram_id) {
-      await notifyUser(user.telegram_id, '❌ Отчёт WB не содержит строк с данными.');
+      notifyUser(user.telegram_id, '❌ Отчёт WB не содержит строк с данными.').catch(console.error);
     }
     return;
   }
@@ -224,10 +224,10 @@ export async function handleParseWb(job: Job): Promise<void> {
   if (dataRows.length > ROW_LIMIT) {
     await updateImport(importId, { status: 'FAILED', failure_reason: 'ROW_LIMIT_EXCEEDED' });
     if (user?.telegram_id) {
-      await notifyUser(
+      notifyUser(
         user.telegram_id,
         `❌ Файл WB содержит слишком много строк (${dataRows.length}). Максимум ${ROW_LIMIT}.`,
-      );
+      ).catch(console.error);
     }
     return;
   }
@@ -379,18 +379,17 @@ export async function handleParseWb(job: Job): Promise<void> {
   });
   console.timeEnd('[parseWb] updateImport');
 
-  // ── ОТПРАВКА УВЕДОМЛЕНИЙ: объединяем в одно сообщение ──
+  // ── ОТПРАВКА УВЕДОМЛЕНИЙ (fire-and-forget) ──
   if (user?.telegram_id) {
-    console.time('[parseWb] buildNotification');
+    console.log(`[parseWb] Building notification for ${user.telegram_id}`);
     let message = `✅ Отчёт WB обработан. Загружено строк: ${successRows}, ошибок: ${errorCount}. Теперь можно загрузить выписку банка.`;
     if (qualityStatus === 'MANUAL_REVIEW') {
       message += `\n\n⚠️ Файл обработан, но значительная часть строк не распознана (ошибок: ${errorCount}). Результаты сверки могут быть неполными. Мы проверим формат вашей выписки.`;
     }
-    console.timeEnd('[parseWb] buildNotification');
-
-    console.time('[parseWb] notifyUser');
-    await notifyUser(user.telegram_id, message);
-    console.timeEnd('[parseWb] notifyUser');
+    // Отправляем в фоне
+    notifyUser(user.telegram_id, message).catch((err) => {
+      console.error('[parseWb] Background notification failed:', err);
+    });
   }
 
   console.timeEnd('[parseWb] total');
