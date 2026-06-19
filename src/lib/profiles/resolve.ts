@@ -68,11 +68,17 @@ export async function resolveProfile(
   _fileSignature: string,
   _userId: string,
 ): Promise<ResolveResult> {
+  console.time('[resolveProfile] total');
+  console.time('[resolveProfile] findActiveProfiles');
   const activeProfiles = await findActiveProfiles();
+  console.timeEnd('[resolveProfile] findActiveProfiles');
+
   if (activeProfiles.length === 0) {
+    console.timeEnd('[resolveProfile] total');
     return { profileId: null, confidence: detectionResult.confidence, status: 'DRAFT' };
   }
 
+  console.time('[resolveProfile] matching loop');
   let bestScore = 0;
   let bestProfileId: string | null = null;
   let bestConfidence = 0;
@@ -116,10 +122,14 @@ export async function resolveProfile(
       bestConfidence = Math.min(1, sigScore * 0.6 + detectionResult.confidence * 0.4);
     }
   }
+  console.timeEnd('[resolveProfile] matching loop');
 
+  let result: ResolveResult;
   if (bestScore >= MATCH_THRESHOLD && bestProfileId) {
-    return { profileId: bestProfileId, confidence: bestConfidence, status: 'MATCHED' };
+    result = { profileId: bestProfileId, confidence: bestConfidence, status: 'MATCHED' };
+  } else {
+    result = { profileId: null, confidence: detectionResult.confidence, status: 'DRAFT' };
   }
-
-  return { profileId: null, confidence: detectionResult.confidence, status: 'DRAFT' };
+  console.timeEnd('[resolveProfile] total');
+  return result;
 }
