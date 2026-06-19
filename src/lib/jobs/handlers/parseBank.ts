@@ -29,7 +29,7 @@ import { getSetting } from '@/src/lib/settings/settings';
 
 const PARSER_VERSION = 'bank_v1';
 const ROW_LIMIT = 50_000;
-const INSERT_CHUNK = 5000; // увеличен с 500 для ускорения вставки
+const INSERT_CHUNK = 2000;
 
 // ── Telegram notification helper ──────────────────────────────────────────────
 
@@ -47,7 +47,7 @@ async function notifyUser(telegramId: bigint, text: string): Promise<void> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(30000), // 30 секунд на ответ
+      signal: AbortSignal.timeout(30000),
     });
     const responseText = await res.text();
     console.log(`[parseBank] Telegram response: ${res.status}`);
@@ -224,7 +224,7 @@ export async function handleParseBank(job: Job): Promise<void> {
     const reason = `File not accessible: ${err instanceof Error ? err.message : String(err)}`;
     await updateImport(importId, { status: 'FAILED', failure_reason: reason });
     if (user?.telegram_id) {
-      await notifyUser(user.telegram_id, '❌ Не удалось прочитать файл выписки.');
+      notifyUser(user.telegram_id, '❌ Не удалось прочитать файл выписки.').catch(console.error);
     }
     return;
   }
@@ -242,10 +242,10 @@ export async function handleParseBank(job: Job): Promise<void> {
     const reason = `Header detection error: ${err instanceof Error ? err.message : String(err)}`;
     await updateImport(importId, { status: 'FAILED', failure_reason: reason });
     if (user?.telegram_id) {
-      await notifyUser(
+      notifyUser(
         user.telegram_id,
         '❌ Не удалось распознать выписку. Попробуйте другой файл или другой формат.',
-      );
+      ).catch(console.error);
     }
     return;
   }
@@ -254,10 +254,10 @@ export async function handleParseBank(job: Job): Promise<void> {
   if (!detection) {
     await updateImport(importId, { status: 'FAILED', failure_reason: 'NO_HEADER_DETECTED' });
     if (user?.telegram_id) {
-      await notifyUser(
+      notifyUser(
         user.telegram_id,
         '❌ Не удалось распознать выписку. Попробуйте другой файл или другой формат.',
-      );
+      ).catch(console.error);
     }
     return;
   }
@@ -309,7 +309,7 @@ export async function handleParseBank(job: Job): Promise<void> {
       failure_reason: 'No data rows after header',
     });
     if (user?.telegram_id) {
-      await notifyUser(user.telegram_id, '❌ Выписка не содержит строк с данными.');
+      notifyUser(user.telegram_id, '❌ Выписка не содержит строк с данными.').catch(console.error);
     }
     return;
   }
@@ -317,10 +317,10 @@ export async function handleParseBank(job: Job): Promise<void> {
   if (dataRows.length > ROW_LIMIT) {
     await updateImport(importId, { status: 'FAILED', failure_reason: 'ROW_LIMIT_EXCEEDED' });
     if (user?.telegram_id) {
-      await notifyUser(
+      notifyUser(
         user.telegram_id,
         `❌ Файл выписки содержит слишком много строк (${dataRows.length}). Максимум ${ROW_LIMIT}.`,
-      );
+      ).catch(console.error);
     }
     return;
   }
@@ -337,10 +337,10 @@ export async function handleParseBank(job: Job): Promise<void> {
       }`;
       await updateImport(importId, { status: 'FAILED', failure_reason: reason });
       if (user?.telegram_id) {
-        await notifyUser(
+        notifyUser(
           user.telegram_id,
           '❌ Не удалось распознать выписку. Попробуйте другой файл или другой формат.',
-        );
+        ).catch(console.error);
       }
       return;
     }
@@ -502,12 +502,12 @@ export async function handleParseBank(job: Job): Promise<void> {
   });
   console.timeEnd('[parseBank] updateImport');
 
-  // updateProfileStats — fire-and-forget, не ждём
+  // updateProfileStats — fire-and-forget
   updateProfileStats(activeProfileId).catch(() => {});
 
-  // ── ОТПРАВКА УВЕДОМЛЕНИЙ: объединяем в одно сообщение ──
+  // ── ОТПРАВКА УВЕДОМЛЕНИЙ (fire-and-forget) ──
   if (user?.telegram_id) {
-    console.time('[parseBank] buildNotification');
+    console.log(`[parseBank] Building notification for ${user.telegram_id}`);
     let message = '';
     if (qualityStatus === 'MANUAL_REVIEW') {
       message = `⚠️ Файл обработан, но значительная часть строк не распознана (ошибок: ${errorCount}). Результаты сверки могут быть неполными. Мы проверим формат вашей выписки.`;
@@ -520,11 +520,11 @@ export async function handleParseBank(job: Job): Promise<void> {
       message = `⚠️ Выписка обработана, но структура банка новая. Создан черновик профиля. Точность распознавания может быть ниже. Рекомендуем проверить отчёт.`;
     }
     message += '\n\nГотово. Теперь можно запустить сверку.';
-    console.timeEnd('[parseBank] buildNotification');
 
-    console.time('[parseBank] notifyUser');
-    await notifyUser(user.telegram_id, message);
-    console.timeEnd('[parseBank] notifyUser');
+    // Отправляем в фоне, не ждём ответа
+    notifyUser(user.telegram_id, message).catch((err) => {
+      console.error('[parseBank] Background notification failed:', err);
+    });
   }
 
   console.timeEnd('[parseBank] total');
