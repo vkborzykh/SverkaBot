@@ -43,12 +43,14 @@ export async function updateImport(
   id: string,
   data: Partial<Omit<NewImport, 'id' | 'created_at'>>,
 ): Promise<Import | undefined> {
+  console.time(`[updateImport] ${id}`);
   const db = getDb();
   const rows = await db
     .update(imports)
     .set(data)
     .where(eq(imports.id, id))
     .returning();
+  console.timeEnd(`[updateImport] ${id}`);
   return rows[0];
 }
 
