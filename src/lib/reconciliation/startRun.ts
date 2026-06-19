@@ -44,19 +44,19 @@ function periodsOverlap(
   );
 }
 
-/**
- * Core "start reconciliation" logic, callable in-process from both the bot
- * handler and the HTTP route — so the bot never has to make a fragile self-HTTP
- * call to its own /api/reconciliation/run endpoint.
- */
 export async function startReconciliation(params: StartRunParams): Promise<StartRunResult> {
+  console.log('[startReconciliation] called with params:', params);
   const { userId } = params;
 
   const user = await findUserById(userId);
-  if (!user) return { error: { code: 'USER_NOT_FOUND', message: 'User not found' } };
+  if (!user) {
+    console.log('[startReconciliation] User not found');
+    return { error: { code: 'USER_NOT_FOUND', message: 'User not found' } };
+  }
 
   const access = checkAccess(user);
   if (access === 'none' || access === 'readonly') {
+    console.log('[startReconciliation] Access denied');
     return { error: { code: 'ACCESS_DENIED', message: 'Subscription required' } };
   }
 
@@ -64,6 +64,8 @@ export async function startReconciliation(params: StartRunParams): Promise<Start
 
   let wbImportId = params.wbImportId;
   let bankImportId = params.bankImportId;
+
+  console.log('[startReconciliation] wbImportId:', wbImportId, 'bankImportId:', bankImportId);
 
   if (wbImportId && bankImportId) {
     const [wbImp, bankImp] = await Promise.all([
@@ -121,6 +123,7 @@ export async function startReconciliation(params: StartRunParams): Promise<Start
     findTransactionsByImportId(bankImportId!),
   ]);
 
+  console.log('[startReconciliation] Creating run with wb_import_id:', wbImportId, 'bank_import_id:', bankImportId);
   const run = await createRun({
     user_id: userId,
     wb_import_id: wbImportId!,
@@ -130,8 +133,11 @@ export async function startReconciliation(params: StartRunParams): Promise<Start
     total_bank_rows: bankTxs.length,
     started_at: new Date(),
   });
+  console.log('[startReconciliation] Run created with id:', run.id);
 
-  await enqueue('reconcile', run.id, { run_id: run.id });
+  console.log('[startReconciliation] Enqueueing reconcile job for run:', run.id);
+  const jobId = await enqueue('reconcile', run.id, { run_id: run.id });
+  console.log('[startReconciliation] Enqueued job id:', jobId);
 
   return { run_id: run.id, status: 'PENDING' };
 }
