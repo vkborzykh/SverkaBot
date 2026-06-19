@@ -1,9 +1,10 @@
-import { sql } from 'drizzle-orm';
+import { sql, inArray } from 'drizzle-orm';
 import { getDb } from '@/src/db/index';
 import { updateJob, type Job } from '@/src/db/repositories/jobs';
 import { findImportById } from '@/src/db/repositories/imports';
 import { findRunById } from '@/src/db/repositories/reconciliation-runs';
 import { findUserById } from '@/src/db/repositories/users';
+import { jobs } from '@/src/db/schema';
 import { handleParseWb } from '@/src/lib/jobs/handlers/parseWb';
 import { handleParseBank } from '@/src/lib/jobs/handlers/parseBank';
 import { handleReconcile } from '@/src/lib/jobs/handlers/reconcile';
@@ -26,35 +27,36 @@ async function claimPendingJobs(): Promise<Job[]> {
   console.log('[claimPendingJobs] starting...');
   const db = getDb();
   try {
-    // Упрощённый запрос — сначала выбираем PENDING задачи, потом обновляем их статус
-    // Это более надёжно, чем UPDATE с подзапросом
-    const pending = await db.execute(sql`
-      SELECT id FROM jobs
-      WHERE status = 'PENDING'
-        AND (
-          payload->>'next_attempt_at' IS NULL
-          OR (payload->>'next_attempt_at')::timestamptz <= NOW()
-        )
-      ORDER BY created_at ASC
-      LIMIT ${BATCH_SIZE}
-    `);
+    // 1. Select pending jobs
+    const pending = await db
+      .select({ id: jobs.id })
+      .from(jobs)
+      .where(
+        sql`${jobs.status} = 'PENDING' AND (
+          ${jobs.payload}->>'next_attempt_at' IS NULL OR
+          (${jobs.payload}->>'next_attempt_at')::timestamptz <= NOW()
+        )`
+      )
+      .orderBy(jobs.created_at)
+      .limit(BATCH_SIZE);
 
     if (pending.length === 0) {
       console.log('[claimPendingJobs] no pending jobs found');
       return [];
     }
 
-    const ids = pending.map((row: any) => row.id);
+    const ids = pending.map((row) => row.id);
     console.log(`[claimPendingJobs] found ${ids.length} pending jobs:`, ids);
 
-    const rows = await db.execute(sql`
-      UPDATE jobs
-      SET status = 'RUNNING', started_at = NOW()
-      WHERE id = ANY(${ids})
-      RETURNING *
-    `);
-    console.log(`[claimPendingJobs] claimed ${rows.length} jobs`);
-    return rows as unknown as Job[];
+    // 2. Update status to RUNNING and return updated rows
+    const updated = await db
+      .update(jobs)
+      .set({ status: 'RUNNING', started_at: new Date() })
+      .where(inArray(jobs.id, ids))
+      .returning();
+
+    console.log(`[claimPendingJobs] claimed ${updated.length} jobs`);
+    return updated as Job[];
   } catch (err) {
     console.error('[claimPendingJobs] error:', err);
     throw err;
