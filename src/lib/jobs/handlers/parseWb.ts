@@ -326,8 +326,9 @@ export async function handleParseWb(job: Job): Promise<void> {
         currency: 'RUB',
         direction: c.direction,
         reference,
+        // Исправление: для payout и возврат не добавляем дополнительный тег
         description:
-          c.kind === 'payout' ? description : `${description ?? ''} [${c.kind}]`.trim(),
+          c.kind === 'payout' || c.kind === 'возврат' ? description : `${description ?? ''} [${c.kind}]`.trim(),
         counterparty,
         row_hash: rowHash,
         raw_payload: c.kind === 'payout' ? rawPayload : null,
@@ -391,10 +392,10 @@ export async function handleParseWb(job: Job): Promise<void> {
       console.error('[parseWb] Background notification failed:', err);
     });
   }
+
   // ── АВТОМАТИЧЕСКИЙ ЗАПУСК СВЕРКИ ──
   if (user?.telegram_id) {
     try {
-      // Проверяем, есть ли COMPLETED выписка для этого пользователя
       const { findImportsByUserId } = await import('@/src/db/repositories/imports');
       const bankImports = await findImportsByUserId(user.id, { sourceType: 'BANK', status: 'COMPLETED' });
       if (bankImports.length > 0) {
@@ -407,7 +408,6 @@ export async function handleParseWb(job: Job): Promise<void> {
         });
         if ('error' in result) {
           console.log('[parseWb] Auto-reconciliation failed:', result.error);
-          // Не уведомляем пользователя об ошибке, чтобы не сбивать с толку
         } else {
           console.log('[parseWb] Auto-reconciliation started with run_id:', result.run_id);
         }
@@ -416,5 +416,6 @@ export async function handleParseWb(job: Job): Promise<void> {
       console.error('[parseWb] Auto-reconciliation error:', err);
     }
   }
+
   console.timeEnd('[parseWb] total');
 }
