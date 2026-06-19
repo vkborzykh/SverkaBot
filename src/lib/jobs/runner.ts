@@ -26,20 +26,31 @@ async function claimPendingJobs(): Promise<Job[]> {
   console.log('[claimPendingJobs] starting...');
   const db = getDb();
   try {
+    // Упрощённый запрос — сначала выбираем PENDING задачи, потом обновляем их статус
+    // Это более надёжно, чем UPDATE с подзапросом
+    const pending = await db.execute(sql`
+      SELECT id FROM jobs
+      WHERE status = 'PENDING'
+        AND (
+          payload->>'next_attempt_at' IS NULL
+          OR (payload->>'next_attempt_at')::timestamptz <= NOW()
+        )
+      ORDER BY created_at ASC
+      LIMIT ${BATCH_SIZE}
+    `);
+
+    if (pending.length === 0) {
+      console.log('[claimPendingJobs] no pending jobs found');
+      return [];
+    }
+
+    const ids = pending.map((row: any) => row.id);
+    console.log(`[claimPendingJobs] found ${ids.length} pending jobs:`, ids);
+
     const rows = await db.execute(sql`
       UPDATE jobs
       SET status = 'RUNNING', started_at = NOW()
-      WHERE id IN (
-        SELECT id FROM jobs
-        WHERE status = 'PENDING'
-          AND (
-            payload->>'next_attempt_at' IS NULL
-            OR (payload->>'next_attempt_at')::timestamptz <= NOW()
-          )
-        ORDER BY created_at ASC
-        LIMIT ${BATCH_SIZE}
-        FOR UPDATE SKIP LOCKED
-      )
+      WHERE id = ANY(${ids})
       RETURNING *
     `);
     console.log(`[claimPendingJobs] claimed ${rows.length} jobs`);
