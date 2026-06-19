@@ -15,14 +15,14 @@ async function notifyUser(telegramId: bigint, text: string): Promise<void> {
   try {
     const url = `https://api.telegram.org/bot${token}/sendMessage`;
     const payload = { chat_id: String(telegramId), text };
-    console.log(`[notifyUser] Sending POST to ${url} with payload:`, payload);
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(30000),
     });
     const responseText = await res.text();
-    console.log(`[notifyUser] Response status: ${res.status}, body: ${responseText}`);
+    console.log(`[notifyUser] Response status: ${res.status}`);
     if (!res.ok) {
       console.error(`[notifyUser] Non-ok response: ${res.status} ${responseText}`);
     }
@@ -39,7 +39,7 @@ function rub(kopeks: bigint): string {
   const cents = abs % BigInt(100);
   const grouped = whole
     .toString()
-    .replace(/\B(?=(\d{3})+(?!\d))/g, '\u00A0'); // non-breaking space thousands
+    .replace(/\B(?=(\d{3})+(?!\d))/g, '\u00A0');
   return `${neg ? '−' : ''}${grouped},${cents.toString().padStart(2, '0')} ₽`;
 }
 
@@ -74,7 +74,6 @@ export async function handleReconcile(job: Job): Promise<void> {
   }
   console.log(`[handleReconcile] Found run with status: ${run.status}`);
 
-  // Idempotency
   if (run.status === 'COMPLETED' || run.status === 'FAILED') {
     console.log(`[handleReconcile] Run already ${run.status}, skipping.`);
     return;
@@ -110,23 +109,18 @@ export async function handleReconcile(job: Job): Promise<void> {
     console.log(`[handleReconcile] Enqueueing report export...`);
     await enqueue('report_export', runId, { run_id: runId });
 
-    // Notify user
+    // ── ОДНО ОБЪЕДИНЁННОЕ УВЕДОМЛЕНИЕ ──
     if (user?.telegram_id) {
       console.log(`[handleReconcile] Notifying user ${user.telegram_id}`);
-      await notifyUser(user.telegram_id, buildUserMessage(result));
+      let message = buildUserMessage(result);
 
       if (bankImport?.quality_status === 'LOW_CONFIDENCE') {
-        await notifyUser(
-          user.telegram_id,
-          '⚠️ Выписка была распознана с низкой уверенностью. Результаты сверки могут быть неточны.',
-        );
+        message += '\n\n⚠️ Выписка была распознана с низкой уверенностью. Результаты сверки могут быть неточны.';
       }
 
-      await notifyUser(
-        user.telegram_id,
-        `Для скачивания отчёта используйте /get_report ${runId}`,
-      );
-      console.log(`[handleReconcile] Notifications sent.`);
+      message += '\n\n📄 Готовлю отчёт – он придёт в течение минуты.';
+      await notifyUser(user.telegram_id, message);
+      console.log(`[handleReconcile] Notification sent.`);
     } else {
       console.warn(`[handleReconcile] No telegram_id for user ${run.user_id}, skipping notifications.`);
     }
