@@ -391,6 +391,30 @@ export async function handleParseWb(job: Job): Promise<void> {
       console.error('[parseWb] Background notification failed:', err);
     });
   }
-
+  // ── АВТОМАТИЧЕСКИЙ ЗАПУСК СВЕРКИ ──
+  if (user?.telegram_id) {
+    try {
+      // Проверяем, есть ли COMPLETED выписка для этого пользователя
+      const { findImportsByUserId } = await import('@/src/db/repositories/imports');
+      const bankImports = await findImportsByUserId(user.id, { sourceType: 'BANK', status: 'COMPLETED' });
+      if (bankImports.length > 0) {
+        console.log('[parseWb] Found completed BANK import, starting reconciliation automatically');
+        const { startReconciliation } = await import('@/src/lib/reconciliation/startRun');
+        const result = await startReconciliation({
+          userId: user.id,
+          wbImportId: importId,
+          bankImportId: bankImports[0].id,
+        });
+        if ('error' in result) {
+          console.log('[parseWb] Auto-reconciliation failed:', result.error);
+          // Не уведомляем пользователя об ошибке, чтобы не сбивать с толку
+        } else {
+          console.log('[parseWb] Auto-reconciliation started with run_id:', result.run_id);
+        }
+      }
+    } catch (err) {
+      console.error('[parseWb] Auto-reconciliation error:', err);
+    }
+  }
   console.timeEnd('[parseWb] total');
 }
