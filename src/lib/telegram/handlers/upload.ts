@@ -121,7 +121,8 @@ async function handleFileUpload(
     if (sourceType === 'WB') {
       await ctx.reply(msg.uploadWbReceived(newImport.id));
     } else {
-      await ctx.reply(msg.uploadBankReceived);
+      // Для BANK добавляем ID в сообщение
+      await ctx.reply(msg.uploadBankReceived(newImport.id));
     }
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
