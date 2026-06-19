@@ -526,6 +526,28 @@ export async function handleParseBank(job: Job): Promise<void> {
       console.error('[parseBank] Background notification failed:', err);
     });
   }
-
+  // ── АВТОМАТИЧЕСКИЙ ЗАПУСК СВЕРКИ ──
+  if (user?.telegram_id) {
+    try {
+      const { findImportsByUserId } = await import('@/src/db/repositories/imports');
+      const wbImports = await findImportsByUserId(user.id, { sourceType: 'WB', status: 'COMPLETED' });
+      if (wbImports.length > 0) {
+        console.log('[parseBank] Found completed WB import, starting reconciliation automatically');
+        const { startReconciliation } = await import('@/src/lib/reconciliation/startRun');
+        const result = await startReconciliation({
+          userId: user.id,
+          wbImportId: wbImports[0].id,
+          bankImportId: importId,
+        });
+        if ('error' in result) {
+          console.log('[parseBank] Auto-reconciliation failed:', result.error);
+        } else {
+          console.log('[parseBank] Auto-reconciliation started with run_id:', result.run_id);
+        }
+      }
+    } catch (err) {
+      console.error('[parseBank] Auto-reconciliation error:', err);
+    }
+  }
   console.timeEnd('[parseBank] total');
 }
