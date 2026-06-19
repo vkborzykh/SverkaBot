@@ -37,14 +37,12 @@ export async function createTransactions(
   data: NewCanonicalTransaction[],
 ): Promise<CanonicalTransaction[]> {
   if (data.length === 0) return [];
+  console.time(`[createTransactions] db connect`);
   const db = getDb();
+  console.timeEnd(`[createTransactions] db connect`);
   console.time(`[createTransactions] insert ${data.length} rows`);
-  // Убираем .returning() — это ускорит запрос, т.к. не нужно возвращать данные.
   await db.insert(canonical_transactions).values(data);
   console.timeEnd(`[createTransactions] insert ${data.length} rows`);
-  // Возвращаем пустой массив, так как мы не возвращаем вставленные строки.
-  // Если вызывающему коду нужны ID, придётся их генерировать заранее или использовать returning.
-  // В нашем случае мы не используем возвращаемые значения, поэтому безопасно.
   return [];
 }
 
