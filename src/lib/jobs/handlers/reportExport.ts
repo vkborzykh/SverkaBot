@@ -19,7 +19,6 @@ import {
   buildMetricsCSV,
   type MatchedRow,
 } from '@/src/lib/reports/csvBuilders';
-import { createZip } from '@/src/lib/reports/zip';
 import { buildHtmlReport, type ClaimRow } from '@/src/lib/reports/htmlReport';
 import { buildClaimCSV } from '@/src/lib/reports/claimBuilder';
 
@@ -27,36 +26,22 @@ async function sendDocumentToUser(
   telegramId: bigint,
   fileBuffer: Buffer,
   filename: string,
-  caption: string,
 ): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return;
 
   try {
-    const blob = new Blob([fileBuffer], { type: 'application/zip' });
-
+    const blob = new Blob([fileBuffer], { type: 'text/html' });
     const formData = new globalThis.FormData();
     formData.append('chat_id', String(telegramId));
     formData.append('document', blob, filename);
-    formData.append('caption', caption);
-
+    // Без caption – уведомление уже было отправлено в handleReconcile
     await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
       method: 'POST',
       body: formData,
     });
-  } catch {
-    try {
-      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: String(telegramId),
-          text: caption,
-        }),
-      });
-    } catch {
-      // notification failures must not fail the job
-    }
+  } catch (err) {
+    console.error('[reportExport] Failed to send document:', err);
   }
 }
 
@@ -73,7 +58,6 @@ export async function handleReportExport(job: Job): Promise<void> {
   const runId = (job.payload as Record<string, string>)?.run_id ?? job.entity_id;
   if (!runId) throw new Error('Missing run_id in report_export job payload');
 
-  // Idempotency: skip if primary report already exists
   const existingReport = await findPrimaryReportByRunId(runId);
   if (existingReport) return;
 
@@ -83,7 +67,6 @@ export async function handleReportExport(job: Job): Promise<void> {
 
   const user = await findUserById(run.user_id);
 
-  // Fetch all data
   const [wbTxs, bankTxs, matches, wbErrors, bankErrors] = await Promise.all([
     findTransactionsByImportId(run.wb_import_id),
     findTransactionsByImportId(run.bank_import_id),
@@ -92,11 +75,9 @@ export async function handleReportExport(job: Job): Promise<void> {
     findParsingErrorsByImportId(run.bank_import_id),
   ]);
 
-  // Build transaction lookup map
   const txMap = new Map<string, CanonicalTransaction>();
   for (const tx of [...wbTxs, ...bankTxs]) txMap.set(tx.id, tx);
 
-  // Process matches
   const matchedRows: MatchedRow[] = [];
   const ambiguousRows: { match_id: string; wb_tx: CanonicalTransaction; candidates_count: number }[] = [];
   const evidenceRows: { match_id: string; match_type: string; evidence: NonNullable<Awaited<ReturnType<typeof findEvidenceByMatchId>>> }[] = [];
@@ -148,13 +129,9 @@ export async function handleReportExport(job: Job): Promise<void> {
     }
   }
 
-  // Unmatched WB transactions
   const unmatchedWbTxs = wbTxs.filter((tx) => !matchedWbTxIds.has(tx.id));
-
-  // Loss estimate: unmatched + 50% of ambiguous
   const lossEstimate = computeLossEstimate(run);
 
-  // WB aggregate (expected / received / discrepancy) from the run's evidence.
   let expectedKopeks = BigInt(0);
   let receivedKopeks = BigInt(0);
   let aggStatus: 'reconciled' | 'underpaid' | 'missing' | 'overpaid' = 'reconciled';
@@ -196,44 +173,26 @@ export async function handleReportExport(job: Job): Promise<void> {
     claimRows,
   });
 
-  // Build CSV files
-  const csvFiles: Record<string, string> = {
-    'summary.csv': buildSummaryCSV(run, lossEstimate),
-    'matched.csv': buildMatchedCSV(matchedRows),
-    'unmatched.csv': buildUnmatchedCSV(unmatchedWbTxs),
-    'ambiguous.csv': buildAmbiguousCSV(ambiguousRows),
-    'wb_rows.csv': buildAllTransactionsCSV(wbTxs),
-    'bank_rows.csv': buildAllTransactionsCSV(bankTxs),
-    'evidence.csv': buildEvidenceCSV(evidenceRows),
-    'parsing_errors.csv': buildParsingErrorsCSV([...wbErrors, ...bankErrors]),
-    'metrics.csv': buildMetricsCSV(run),
-    'claim.csv': buildClaimCSV(unmatchedWbTxs),
-    'report.html': htmlReport,
-  };
+  // Сохраняем HTML в буфер
+  const htmlBuffer = Buffer.from(htmlReport, 'utf-8');
 
-  // Create ZIP archive
-  const zipBuffer = await createZip(csvFiles);
+  // Store HTML in storage
+  const storagePath = await storeReport(runId, htmlBuffer);
 
-  // Store ZIP in filesystem/storage
-  const storagePath = await storeReport(runId, zipBuffer);
-
-  // Create report record in DB
   await createReport({
     run_id: runId,
     storage_path: storagePath,
-    export_type: 'ZIP',
+    export_type: 'HTML',
     report_version: 1,
     is_primary: true,
   });
 
-  // Send ZIP file to user via Telegram
+  // Отправляем только HTML-файл (без уведомления)
   if (user?.telegram_id && process.env.NODE_ENV !== 'test') {
-    const caption = `Отчёт по сверке ${runId} готов. Содержит сводку, совпадения, расхождения и детали оценки.`;
     await sendDocumentToUser(
       user.telegram_id,
-      zipBuffer,
-      `report_${runId.slice(0, 8)}.zip`,
-      caption,
+      htmlBuffer,
+      `report_${runId.slice(0, 8)}.html`,
     );
   }
 }
