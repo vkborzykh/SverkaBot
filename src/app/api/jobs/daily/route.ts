@@ -8,17 +8,18 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// This is the scheduled entry point (Vercel Cron, daily on Hobby). It enqueues
-// the reminder jobs and then drains the queue in the same invocation, so the
-// reminders — and any straggler parse/reconcile jobs left from earlier — get
-// processed without waiting for the next user interaction.
+// Scheduled entry point (Vercel Cron, daily). Enqueues reminder jobs. Under
+// QUEUE_DRIVER=bull the worker's poller drains them; under 'db' we drain here.
 async function runDaily() {
   const [subReminderId, inactivityId] = await Promise.all([
     enqueue('subscription_reminder', 'daily', { triggered_at: new Date().toISOString() }),
     enqueue('inactivity_reminder', 'daily', { triggered_at: new Date().toISOString() }),
   ]);
 
-  const processed = await drainQueue();
+  let processed = 0;
+  if ((process.env.QUEUE_DRIVER ?? 'db') !== 'bull') {
+    processed = await drainQueue(); // legacy path only
+  }
 
   return okResponse({
     enqueued: {
@@ -35,7 +36,6 @@ export async function POST(req: NextRequest) {
   return runDaily();
 }
 
-// Vercel Cron sends GET with `Authorization: Bearer $CRON_SECRET`.
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (!secret || req.headers.get('authorization') !== `Bearer ${secret}`) {
