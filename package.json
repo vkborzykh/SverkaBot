@@ -13,7 +13,9 @@
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx src/db/seed.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "worker": "tsx worker/index.ts",
+    "test:enqueue": "tsx scripts/enqueue-test.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
@@ -52,6 +54,7 @@
     "@types/react-dom": "18.2.7",
     "archiver": "^7.0.1",
     "autoprefixer": "10.4.15",
+    "bullmq": "^5.79.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "cmdk": "^1.0.0",
@@ -64,6 +67,7 @@
     "eslint-config-next": "13.5.1",
     "iconv-lite": "^0.7.2",
     "input-otp": "^1.2.4",
+    "ioredis": "^5.11.1",
     "lucide-react": "^0.446.0",
     "next": "13.5.1",
     "next-themes": "^0.3.0",
