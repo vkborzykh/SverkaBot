@@ -5,10 +5,14 @@ import { drainQueue } from '@/src/lib/jobs/runner';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-// Hobby ceiling is 60s; raise to 300 on Pro for very large files.
 export const maxDuration = 60;
 
 async function run() {
+  // Under BullMQ, the always-on worker's poller drains the queue. This route
+  // must not also drain, or jobs would be processed twice.
+  if ((process.env.QUEUE_DRIVER ?? 'db') === 'bull') {
+    return okResponse({ processed: 0, skipped: 'QUEUE_DRIVER=bull' });
+  }
   try {
     const processed = await drainQueue();
     return okResponse({ processed });
@@ -18,16 +22,12 @@ async function run() {
   }
 }
 
-// Internal/manual trigger (bot layer or ops) — authenticated by X-Internal-Token.
 export async function POST(req: NextRequest) {
   const guard = requireInternalToken(req);
   if (guard) return guard;
   return run();
 }
 
-// Vercel Cron trigger — Vercel sends GET with `Authorization: Bearer $CRON_SECRET`.
-// On Hobby, cron runs daily (see /api/jobs/daily, which is the scheduled entry
-// point); this GET is kept for manual checks and for a minute-level cron on Pro.
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (!secret || req.headers.get('authorization') !== `Bearer ${secret}`) {
