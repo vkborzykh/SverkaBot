@@ -1,0 +1,18 @@
+[Unit]
+Description=SverkaBot BullMQ worker + poller
+After=network-online.target redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/SverkaBot
+ExecStart=/usr/bin/npm run worker
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sverka-worker
+
+[Install]
+WantedBy=multi-user.target
