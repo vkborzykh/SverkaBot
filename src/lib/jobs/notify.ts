@@ -1,33 +1,41 @@
-// Maps a job row to its handler. Shared by the legacy cron drain (runner.ts)
-// and the BullMQ worker (bull/worker.ts) so dispatch logic lives in one place.
-// The handlers themselves are unchanged — they receive the `jobs` row as-is.
+// User-facing failure notification (Russian). Extracted from runner.ts so both
+// the legacy drain and the BullMQ worker reuse it. Must never throw.
 
 import type { Job } from '@/src/db/repositories/jobs';
-import { handleParseWb } from './handlers/parseWb';
-import { handleParseBank } from './handlers/parseBank';
-import { handleReconcile } from './handlers/reconcile';
-import { handleReportExport } from './handlers/reportExport';
-import { handleSubscriptionReminder } from './handlers/subscriptionReminder';
-import { handleInactivityReminder } from './handlers/inactivityReminder';
-import { handleFileCleanup } from './handlers/fileCleanup';
+import { findImportById } from '@/src/db/repositories/imports';
+import { findRunById } from '@/src/db/repositories/reconciliation-runs';
+import { findUserById } from '@/src/db/repositories/users';
 
-export function dispatch(job: Job): Promise<void> {
-  switch (job.job_type) {
-    case 'parse_wb':
-      return handleParseWb(job);
-    case 'parse_bank':
-      return handleParseBank(job);
-    case 'reconcile':
-      return handleReconcile(job);
-    case 'report_export':
-      return handleReportExport(job);
-    case 'subscription_reminder':
-      return handleSubscriptionReminder(job);
-    case 'inactivity_reminder':
-      return handleInactivityReminder(job);
-    case 'file_cleanup':
-      return handleFileCleanup(job);
-    default:
-      throw new Error(`Unknown job type: ${job.job_type}`);
+export async function notifyFailure(job: Job): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+
+  try {
+    let telegramId: bigint | null = null;
+    let text = 'Не удалось обработать запрос. Попробуйте ещё раз.';
+
+    if (job.job_type === 'parse_wb' || job.job_type === 'parse_bank') {
+      const imp = job.entity_id ? await findImportById(job.entity_id) : null;
+      const user = imp ? await findUserById(imp.user_id) : null;
+      telegramId = user?.telegram_id ?? null;
+      text =
+        job.job_type === 'parse_wb'
+          ? '❌ Не удалось обработать отчёт WB. Проверьте файл и попробуйте снова.'
+          : '❌ Не удалось обработать выписку. Попробуйте другой файл или формат.';
+    } else if (job.job_type === 'reconcile') {
+      const run = job.entity_id ? await findRunById(job.entity_id) : null;
+      const user = run ? await findUserById(run.user_id) : null;
+      telegramId = user?.telegram_id ?? null;
+      text = '❌ Не удалось завершить сверку. Попробуйте запустить её ещё раз.';
+    }
+
+    if (!telegramId) return;
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: String(telegramId), text }),
+    });
+  } catch {
+    // a failed notification must never break the caller
   }
 }
