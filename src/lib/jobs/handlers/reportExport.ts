@@ -35,7 +35,6 @@ async function sendDocumentToUser(
     const formData = new globalThis.FormData();
     formData.append('chat_id', String(telegramId));
     formData.append('document', blob, filename);
-    // Без caption – уведомление уже было отправлено в handleReconcile
     await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
       method: 'POST',
       body: formData,
@@ -58,6 +57,7 @@ export async function handleReportExport(job: Job): Promise<void> {
   const runId = (job.payload as Record<string, string>)?.run_id ?? job.entity_id;
   if (!runId) throw new Error('Missing run_id in report_export job payload');
 
+  // Проверка перед созданием – вдруг уже создан (гонка повторов)
   const existingReport = await findPrimaryReportByRunId(runId);
   if (existingReport) return;
 
@@ -173,21 +173,26 @@ export async function handleReportExport(job: Job): Promise<void> {
     claimRows,
   });
 
-  // Сохраняем HTML в буфер
   const htmlBuffer = Buffer.from(htmlReport, 'utf-8');
 
-  // Store HTML in storage
+  // Сохраняем HTML в хранилище
   const storagePath = await storeReport(runId, htmlBuffer);
 
-  await createReport({
-    run_id: runId,
-    storage_path: storagePath,
-    export_type: 'HTML',
-    report_version: 1,
-    is_primary: true,
-  });
+  // Безопасная вставка: игнорируем дубликат (если задача выполнилась параллельно)
+  try {
+    await createReport({
+      run_id: runId,
+      storage_path: storagePath,
+      export_type: 'HTML',
+      report_version: 1,
+      is_primary: true,
+    });
+  } catch (err: any) {
+    // Если запись уже существует – всё равно отправляем файл, ошибка не критична
+    console.error('[reportExport] createReport error (ignored):', err.message);
+  }
 
-  // Отправляем только HTML-файл (без уведомления)
+  // Отправляем HTML-файл пользователю
   if (user?.telegram_id && process.env.NODE_ENV !== 'test') {
     await sendDocumentToUser(
       user.telegram_id,
