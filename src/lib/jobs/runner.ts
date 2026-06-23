@@ -1,4 +1,4 @@
-import { sql, inArray } from 'drizzle-orm';
+import { sql, inArray, eq, and } from 'drizzle-orm';
 import { getDb } from '@/src/db/index';
 import { updateJob, type Job } from '@/src/db/repositories/jobs';
 import { jobs } from '@/src/db/schema';
@@ -17,37 +17,36 @@ function backoffMs(retries: number): number {
 
 async function claimPendingJobs(): Promise<Job[]> {
   const db = getDb();
-  // Используем транзакцию с блокировкой строк, чтобы избежать гонки
-  return await db.transaction(async (tx) => {
-    // Выбираем задачи, которые можно взять, с блокировкой
-    const pending = await tx
-      .select()
-      .from(jobs)
-      .where(
-        sql`${jobs.status} = 'PENDING' AND (
-          ${jobs.payload}->>'next_attempt_at' IS NULL OR
-          (${jobs.payload}->>'next_attempt_at')::timestamptz <= NOW()
-        )`
+  // Выбираем до BATCH_SIZE PENDING-задач, которые готовы к запуску
+  const pending = await db
+    .select()
+    .from(jobs)
+    .where(
+      sql`${jobs.status} = 'PENDING' AND (
+        ${jobs.payload}->>'next_attempt_at' IS NULL OR
+        (${jobs.payload}->>'next_attempt_at')::timestamptz <= NOW()
+      )`
+    )
+    .orderBy(jobs.created_at)
+    .limit(BATCH_SIZE);
+
+  if (pending.length === 0) return [];
+
+  // Атомарно обновляем только те строки, которые ещё PENDING,
+  // и возвращаем обновлённые. Это исключает гонку без FOR UPDATE.
+  const ids = pending.map((row) => row.id);
+  const updated = await db
+    .update(jobs)
+    .set({ status: 'RUNNING', started_at: new Date() })
+    .where(
+      and(
+        inArray(jobs.id, ids),
+        eq(jobs.status, 'PENDING')   // гарантия, что другой обработчик не взял задачу
       )
-      .orderBy(jobs.created_at)
-      .limit(BATCH_SIZE)
-      .for('update', { skipLocked: true });   // ← ключевая блокировка
+    )
+    .returning();
 
-    if (pending.length === 0) {
-      tx.rollback?.();  // явно откатываем пустую транзакцию
-      return [];
-    }
-
-    const ids = pending.map((row) => row.id);
-    // Обновляем статус тех же строк внутри транзакции
-    const updated = await tx
-      .update(jobs)
-      .set({ status: 'RUNNING', started_at: new Date() })
-      .where(inArray(jobs.id, ids))
-      .returning();
-
-    return updated as Job[];
-  });
+  return updated as Job[];
 }
 
 async function processBatch(claimed: Job[]): Promise<void> {
@@ -90,7 +89,6 @@ async function processBatch(claimed: Job[]): Promise<void> {
   );
 }
 
-// Legacy in-process drain. Used only when QUEUE_DRIVER=db (rollback path).
 export async function drainQueue(): Promise<number> {
   let handled = 0;
   for (let i = 0; i < MAX_BATCHES_PER_DRAIN; i++) {
