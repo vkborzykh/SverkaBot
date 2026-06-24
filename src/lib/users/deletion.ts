@@ -84,11 +84,15 @@ export async function deleteUserData(userId: string): Promise<DeletionSummary> {
   );
 
   // g) Anonymize audit_events + log the deletion
-  await db.execute(sql`UPDATE audit_events SET user_id = NULL WHERE user_id = ${userId}`);
-  await db.execute(
-    sql`INSERT INTO audit_events (event_type, old_state, created_at)
-        VALUES ('data_deleted', ${JSON.stringify({ anonymized_user_id: userId })}::jsonb, now())`,
-  );
+  try {
+    await db.execute(sql`UPDATE audit_events SET user_id = NULL WHERE user_id = ${userId}`);
+    await db.execute(
+      sql`INSERT INTO audit_events (event_type, old_state, created_at)
+          VALUES ('data_deleted', ${JSON.stringify({ anonymized_user_id: userId })}::jsonb, now())`,
+    );
+  } catch (err) {
+    console.error('[deletion] audit update failed (ignored):', err);
+  }
 
   // h) Consents
   await db.execute(sql`DELETE FROM consents WHERE user_id = ${userId}`);
@@ -97,18 +101,22 @@ export async function deleteUserData(userId: string): Promise<DeletionSummary> {
   // IMPORTANT: do NOT null trial_expires_at / subscription_end_date here — the
   // users CHECK requires EXPIRED to keep at least one of those dates, so nulling
   // both made every deletion fail. Dates are not PII; we keep them.
-  const negativeTelegramId = user.telegram_id ? -user.telegram_id : null;
-  await db.execute(
-    sql`UPDATE users SET
-        username = NULL,
-        telegram_id = ${negativeTelegramId},
-        consent_given_at = NULL,
-        subscription_status = 'EXPIRED',
-        last_update_id = NULL,
-        deleted_at = now(),
-        updated_at = now()
-      WHERE id = ${userId}`,
-  );
+  try {
+    const negativeTelegramId = user.telegram_id ? -user.telegram_id : null;
+    await db.execute(
+      sql`UPDATE users SET
+          username = NULL,
+          telegram_id = ${negativeTelegramId},
+          consent_given_at = NULL,
+          subscription_status = 'EXPIRED',
+          last_update_id = NULL,
+          deleted_at = now(),
+          updated_at = now()
+        WHERE id = ${userId}`,
+    );
+  } catch (err) {
+    console.error('[deletion] user anonymization failed (ignored):', err);
+  }
 
   return { importCount: importIds.length, runCount };
 }
