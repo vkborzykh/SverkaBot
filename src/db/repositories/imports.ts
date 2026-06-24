@@ -1,4 +1,4 @@
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, desc } from 'drizzle-orm';
 import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
 import { getDb } from '../index';
 import { imports } from '../schema';
@@ -25,11 +25,14 @@ export async function findImportsByUserId(
   if (opts?.sourceType) {
     conditions.push(eq(imports.source_type, opts.sourceType));
   }
+  if (opts?.status) {
+    conditions.push(eq(imports.status, opts.status));
+  }
   const q = db
     .select()
     .from(imports)
     .where(and(...conditions))
-    .orderBy(imports.created_at);
+    .orderBy(desc(imports.created_at)); // ← теперь последние сверху
   return opts?.limit ? q.limit(opts.limit) : q;
 }
 
