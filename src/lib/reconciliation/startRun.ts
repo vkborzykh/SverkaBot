@@ -2,7 +2,6 @@ import { findUserById } from '@/src/db/repositories/users';
 import { findImportsByUserId, findImportById } from '@/src/db/repositories/imports';
 import { createRun } from '@/src/db/repositories/reconciliation-runs';
 import { checkAccess } from '@/src/lib/telegram/access';
-import { enqueue } from '@/src/lib/jobs/queue';
 import { getSetting } from '@/src/lib/settings/settings';
 import { findTransactionsByImportId } from '@/src/db/repositories/canonical-transactions';
 
@@ -65,8 +64,6 @@ export async function startReconciliation(params: StartRunParams): Promise<Start
   let wbImportId = params.wbImportId;
   let bankImportId = params.bankImportId;
 
-  console.log('[startReconciliation] wbImportId:', wbImportId, 'bankImportId:', bankImportId);
-
   if (wbImportId && bankImportId) {
     const [wbImp, bankImp] = await Promise.all([
       findImportById(wbImportId),
@@ -123,7 +120,7 @@ export async function startReconciliation(params: StartRunParams): Promise<Start
     findTransactionsByImportId(bankImportId!),
   ]);
 
-  console.log('[startReconciliation] Creating run with wb_import_id:', wbImportId, 'bank_import_id:', bankImportId);
+  console.log('[startReconciliation] Creating run...');
   const run = await createRun({
     user_id: userId,
     wb_import_id: wbImportId!,
@@ -133,11 +130,6 @@ export async function startReconciliation(params: StartRunParams): Promise<Start
     total_bank_rows: bankTxs.length,
     started_at: new Date(),
   });
-  console.log('[startReconciliation] Run created with id:', run.id);
-
-  console.log('[startReconciliation] Enqueueing reconcile job for run:', run.id);
-  const jobId = await enqueue('reconcile', run.id, { run_id: run.id });
-  console.log('[startReconciliation] Enqueued job id:', jobId);
 
   return { run_id: run.id, status: 'PENDING' };
 }
