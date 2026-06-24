@@ -15,12 +15,11 @@ import { normalizeDate } from '@/src/lib/parsing/normalize/dates';
 import { normalizeAmount } from '@/src/lib/parsing/normalize/amounts';
 import { normalizeText } from '@/src/lib/parsing/normalize/text';
 import { sha256 } from '@/src/lib/ingestion/hash';
+import { enqueue } from '@/src/lib/jobs/queue';
 
 const PARSER_VERSION = 'wb_v1';
 const ROW_LIMIT = 50_000;
 const INSERT_CHUNK = 2000;
-
-// ── Telegram notification helper ─────────────────────────────────────────────
 
 async function notifyUser(telegramId: bigint, text: string): Promise<void> {
   console.log(`[parseWb] notifyUser called for ${telegramId}, text length: ${text.length}`);
@@ -48,13 +47,9 @@ async function notifyUser(telegramId: bigint, text: string): Promise<void> {
   }
 }
 
-// ── File loading ──────────────────────────────────────────────────────────────
-
 async function loadFileBuffer(storagePath: string): Promise<Buffer> {
   return loadFile(storagePath);
 }
-
-// ── Header detection ─────────────────────────────────────────────────────────
 
 const DATE_PRIORITY = ['дата продажи', 'дата операции', 'дата заказа', 'дата', 'date'];
 const AMOUNT_PRIORITY = [
@@ -83,27 +78,20 @@ interface ColumnMap {
 
 function detectColumns(headers: unknown[]): ColumnMap {
   const lower = headers.map((h) => normalizeText(h));
-
   const dateCol = pickByPriority(lower, DATE_PRIORITY);
   const amountCol = pickByPriority(lower, AMOUNT_PRIORITY);
-
   if (dateCol === -1 || amountCol === -1) {
-    throw new Error(
-      `Required columns not found. Headers: ${lower.join(', ')}`,
-    );
+    throw new Error(`Required columns not found. Headers: ${lower.join(', ')}`);
   }
-
   const referenceCol = lower.findIndex(
     (h) => h.includes('номер поставки') || h.includes('srid') || h.includes('номер'),
   );
   const descriptionCol = lower.findIndex(
-    (h) =>
-      h.includes('обоснование') || h.includes('назначение') || h.includes('описание'),
+    (h) => h.includes('обоснование') || h.includes('назначение') || h.includes('описание'),
   );
   const counterpartyCol = lower.findIndex(
     (h) => h.includes('партн') || h.includes('контрагент') || h.includes('получатель'),
   );
-
   return {
     dateCol,
     amountCol,
@@ -113,8 +101,6 @@ function detectColumns(headers: unknown[]): ColumnMap {
   };
 }
 
-// ── Main handler ──────────────────────────────────────────────────────────────
-
 export async function handleParseWb(job: Job): Promise<void> {
   console.time('[parseWb] total');
   const importId = (job.payload as Record<string, string>)?.import_id ?? job.entity_id;
@@ -122,7 +108,6 @@ export async function handleParseWb(job: Job): Promise<void> {
 
   const imp = await findImportById(importId);
   if (!imp) throw new Error(`Import not found: ${importId}`);
-
   if (imp.status === 'COMPLETED' || imp.status === 'FAILED') return;
 
   const user = await findUserById(imp.user_id);
@@ -159,34 +144,20 @@ export async function handleParseWb(job: Job): Promise<void> {
   const sheetName = workbook.SheetNames[0];
   const sheet = workbook.Sheets[sheetName];
   if (!sheet) {
-    await updateImport(importId, {
-      status: 'FAILED',
-      failure_reason: 'Empty workbook: no sheets found',
-    });
+    await updateImport(importId, { status: 'FAILED', failure_reason: 'Empty workbook: no sheets found' });
     if (user?.telegram_id) {
       notifyUser(user.telegram_id, '❌ Файл WB пуст. Пришлите корректный отчёт.').catch(console.error);
     }
     return;
   }
 
-  const rawRows: unknown[][] = XLSX.utils.sheet_to_json(sheet, {
-    header: 1,
-    defval: null,
-  });
-
+  const rawRows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
   let headerRowIdx = 0;
-  while (
-    headerRowIdx < rawRows.length &&
-    rawRows[headerRowIdx].every((c) => c === null || c === '')
-  ) {
+  while (headerRowIdx < rawRows.length && rawRows[headerRowIdx].every((c) => c === null || c === '')) {
     headerRowIdx++;
   }
-
   if (headerRowIdx >= rawRows.length) {
-    await updateImport(importId, {
-      status: 'FAILED',
-      failure_reason: 'No data rows found',
-    });
+    await updateImport(importId, { status: 'FAILED', failure_reason: 'No data rows found' });
     if (user?.telegram_id) {
       notifyUser(user.telegram_id, '❌ Файл WB не содержит данных.').catch(console.error);
     }
@@ -206,28 +177,18 @@ export async function handleParseWb(job: Job): Promise<void> {
     return;
   }
 
-  const dataRows = rawRows.slice(headerRowIdx + 1).filter(
-    (r) => r.some((c) => c !== null && c !== ''),
-  );
-
+  const dataRows = rawRows.slice(headerRowIdx + 1).filter((r) => r.some((c) => c !== null && c !== ''));
   if (dataRows.length === 0) {
-    await updateImport(importId, {
-      status: 'FAILED',
-      failure_reason: 'No data rows after header',
-    });
+    await updateImport(importId, { status: 'FAILED', failure_reason: 'No data rows after header' });
     if (user?.telegram_id) {
       notifyUser(user.telegram_id, '❌ Отчёт WB не содержит строк с данными.').catch(console.error);
     }
     return;
   }
-
   if (dataRows.length > ROW_LIMIT) {
     await updateImport(importId, { status: 'FAILED', failure_reason: 'ROW_LIMIT_EXCEEDED' });
     if (user?.telegram_id) {
-      notifyUser(
-        user.telegram_id,
-        `❌ Файл WB содержит слишком много строк (${dataRows.length}). Максимум ${ROW_LIMIT}.`,
-      ).catch(console.error);
+      notifyUser(user.telegram_id, `❌ Файл WB содержит слишком много строк (${dataRows.length}). Максимум ${ROW_LIMIT}.`).catch(console.error);
     }
     return;
   }
@@ -238,85 +199,47 @@ export async function handleParseWb(job: Job): Promise<void> {
   const transactions: NewCanonicalTransaction[] = [];
   const errors: NewParsingError[] = [];
   const successDates: Date[] = [];
-
   let processedRows = 0;
 
   for (let i = 0; i < dataRows.length; i++) {
     const row = dataRows[i];
     const rowNumber = i + 1;
     const rawFragment = JSON.stringify(row).slice(0, 200);
-
-    const isEmpty = row.every(
-      (c) => c === null || c === undefined || String(c).trim() === '',
-    );
-    if (isEmpty) continue;
+    if (row.every((c) => c === null || c === undefined || String(c).trim() === '')) continue;
 
     let txDate: Date;
     try {
       txDate = normalizeDate(row[colMap.dateCol]);
     } catch (e) {
-      errors.push({
-        import_id: importId,
-        row_number: rowNumber,
-        error_code: 'INVALID_DATE',
-        error_message: e instanceof Error ? e.message : String(e),
-        raw_fragment: rawFragment,
-      });
+      errors.push({ import_id: importId, row_number: rowNumber, error_code: 'INVALID_DATE', error_message: e instanceof Error ? e.message : String(e), raw_fragment: rawFragment });
       continue;
     }
 
     const components: { amount: bigint; direction: 'IN' | 'OUT'; kind: string }[] = [];
-
     const rawPayout = row[colMap.amountCol];
     if (rawPayout !== null && rawPayout !== undefined && String(rawPayout).trim() !== '') {
       try {
         const p = normalizeAmount(rawPayout);
         if (p !== BigInt(0)) {
-          components.push({
-            amount: p < BigInt(0) ? -p : p,
-            direction: p < BigInt(0) ? 'OUT' : 'IN',
-            kind: p < BigInt(0) ? 'возврат' : 'payout',
-          });
+          components.push({ amount: p < BigInt(0) ? -p : p, direction: p < BigInt(0) ? 'OUT' : 'IN', kind: p < BigInt(0) ? 'возврат' : 'payout' });
         }
       } catch (e) {
-        errors.push({
-          import_id: importId,
-          row_number: rowNumber,
-          error_code: 'INVALID_AMOUNT',
-          error_message: e instanceof Error ? e.message : String(e),
-          raw_fragment: rawFragment,
-        });
+        errors.push({ import_id: importId, row_number: rowNumber, error_code: 'INVALID_AMOUNT', error_message: e instanceof Error ? e.message : String(e), raw_fragment: rawFragment });
         continue;
       }
     }
-
     if (components.length === 0) {
       processedRows++;
       continue;
     }
 
-    const reference =
-      colMap.referenceCol !== null ? normalizeText(row[colMap.referenceCol]) : null;
-    const description =
-      colMap.descriptionCol !== null ? normalizeText(row[colMap.descriptionCol]) : null;
-    const counterparty =
-      colMap.counterpartyCol !== null ? normalizeText(row[colMap.counterpartyCol]) : null;
-
+    const reference = colMap.referenceCol !== null ? normalizeText(row[colMap.referenceCol]) : null;
+    const description = colMap.descriptionCol !== null ? normalizeText(row[colMap.descriptionCol]) : null;
+    const counterparty = colMap.counterpartyCol !== null ? normalizeText(row[colMap.counterpartyCol]) : null;
     const rawPayload = JSON.parse(JSON.stringify(row).slice(0, 4000)) as unknown;
 
     for (const c of components) {
-      const rowHash = sha256(
-        Buffer.from(
-          JSON.stringify({
-            importId,
-            rowNumber,
-            kind: c.kind,
-            direction: c.direction,
-            txDate: txDate.toISOString(),
-            amount: String(c.amount),
-          }),
-        ),
-      );
+      const rowHash = sha256(Buffer.from(JSON.stringify({ importId, rowNumber, kind: c.kind, direction: c.direction, txDate: txDate.toISOString(), amount: String(c.amount) })));
       transactions.push({
         import_id: importId,
         source_type: 'WB',
@@ -326,14 +249,12 @@ export async function handleParseWb(job: Job): Promise<void> {
         currency: 'RUB',
         direction: c.direction,
         reference,
-        description:
-          c.kind === 'payout' || c.kind === 'возврат' ? description : `${description ?? ''} [${c.kind}]`.trim(),
+        description: c.kind === 'payout' || c.kind === 'возврат' ? description : `${description ?? ''} [${c.kind}]`.trim(),
         counterparty,
         row_hash: rowHash,
         raw_payload: c.kind === 'payout' ? rawPayload : null,
       });
     }
-
     processedRows++;
     successDates.push(txDate);
   }
@@ -349,14 +270,10 @@ export async function handleParseWb(job: Job): Promise<void> {
   const totalRows = dataRows.length;
   const successRows = processedRows;
   const errorCount = errors.length;
-  const parseSuccessRate =
-    totalRows > 0 ? ((successRows / totalRows) * 100).toFixed(2) : '0.00';
+  const parseSuccessRate = totalRows > 0 ? ((successRows / totalRows) * 100).toFixed(2) : '0.00';
 
-  let qualityStatus: 'HIGH_CONFIDENCE' | 'LOW_CONFIDENCE' | 'MANUAL_REVIEW' =
-    'HIGH_CONFIDENCE';
-  if (parseFloat(parseSuccessRate) < 70) {
-    qualityStatus = 'MANUAL_REVIEW';
-  }
+  let qualityStatus: 'HIGH_CONFIDENCE' | 'LOW_CONFIDENCE' | 'MANUAL_REVIEW' = 'HIGH_CONFIDENCE';
+  if (parseFloat(parseSuccessRate) < 70) qualityStatus = 'MANUAL_REVIEW';
 
   let periodStart: string | null = null;
   let periodEnd: string | null = null;
@@ -366,7 +283,6 @@ export async function handleParseWb(job: Job): Promise<void> {
     periodEnd = sorted[sorted.length - 1].toISOString().slice(0, 10);
   }
 
-  console.time('[parseWb] updateImport');
   await updateImport(importId, {
     status: 'COMPLETED',
     quality_status: qualityStatus,
@@ -377,46 +293,36 @@ export async function handleParseWb(job: Job): Promise<void> {
     parser_version: PARSER_VERSION,
     failure_reason: null,
   });
-  console.timeEnd('[parseWb] updateImport');
 
-  // ── УВЕДОМЛЕНИЕ И АВТОЗАПУСК (единый блок) ──
+  // ── Уведомление и автозапуск ──
   if (user?.telegram_id) {
     try {
-      // Проверяем, есть ли уже готовая выписка
-      const bankImports = await findImportsByUserId(user.id, {
-        sourceType: 'BANK',
-        status: 'COMPLETED',
-        limit: 1,
-      });
+      const bankImports = await findImportsByUserId(user.id, { sourceType: 'BANK', status: 'COMPLETED', limit: 1 });
       const hasBank = bankImports.length > 0;
 
       let message = '';
       if (qualityStatus === 'MANUAL_REVIEW') {
-        message = `⚠️ Файл обработан, но значительная часть строк не распознана (ошибок: ${errorCount}). Результаты сверки могут быть неполными. Мы проверим формат вашей выписки.`;
+        message = `⚠️ Файл обработан, но значительная часть строк не распознана (ошибок: ${errorCount}). Результаты сверки могут быть неполными.`;
       } else {
         message = `✅ Отчёт WB обработан. Загружено строк: ${successRows}, ошибок: ${errorCount}.`;
       }
 
       if (hasBank) {
         message += '\n\nГотово. Теперь можно запустить сверку.';
-        // Отправляем уведомление о готовности
-        notifyUser(user.telegram_id, message).catch(console.error);
+        await notifyUser(user.telegram_id, message);
 
-        // Автоматически запускаем сверку
+        // Автозапуск сверки
         const { startReconciliation } = await import('@/src/lib/reconciliation/startRun');
-        const result = await startReconciliation({
-          userId: user.id,
-          wbImportId: importId,
-          bankImportId: bankImports[0].id,
-        });
-        if ('error' in result) {
-          console.log('[parseWb] Auto-reconciliation failed:', result.error);
+        const result = await startReconciliation({ userId: user.id, wbImportId: importId, bankImportId: bankImports[0].id });
+        if (!('error' in result)) {
+          await enqueue('reconcile', result.run_id, { run_id: result.run_id });
+          await notifyUser(user.telegram_id, `Сверка запущена. Обычно занимает до минуты. Статус: /sync_status ${result.run_id}.`);
         } else {
-          console.log('[parseWb] Auto-reconciliation started with run_id:', result.run_id);
+          console.log('[parseWb] Auto-reconciliation failed:', result.error);
         }
       } else {
         message += '\n\nТеперь можно загрузить выписку банка.';
-        notifyUser(user.telegram_id, message).catch(console.error);
+        await notifyUser(user.telegram_id, message);
       }
     } catch (err) {
       console.error('[parseWb] Notification/auto-reconciliation error:', err);
