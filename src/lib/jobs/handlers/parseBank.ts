@@ -26,12 +26,11 @@ import { normalizeAmount } from '@/src/lib/parsing/normalize/amounts';
 import { normalizeText } from '@/src/lib/parsing/normalize/text';
 import { sha256 } from '@/src/lib/ingestion/hash';
 import { getSetting } from '@/src/lib/settings/settings';
+import { enqueue } from '@/src/lib/jobs/queue';
 
 const PARSER_VERSION = 'bank_v1';
 const ROW_LIMIT = 50_000;
 const INSERT_CHUNK = 2000;
-
-// ── Telegram notification helper ──────────────────────────────────────────────
 
 async function notifyUser(telegramId: bigint, text: string): Promise<void> {
   console.log(`[parseBank] notifyUser called for ${telegramId}, text length: ${text.length}`);
@@ -59,35 +58,21 @@ async function notifyUser(telegramId: bigint, text: string): Promise<void> {
   }
 }
 
-// ── File loading ──────────────────────────────────────────────────────────────
-
 async function loadFileBuffer(storagePath: string): Promise<Buffer> {
   return loadFile(storagePath);
 }
 
-// ── Row parsing helpers ───────────────────────────────────────────────────────
-
-function extractRows(
-  allRows: unknown[][],
-  headerRowIndex: number,
-): { headerRow: unknown[]; dataRows: unknown[][] } {
+function extractRows(allRows: unknown[][], headerRowIndex: number): { headerRow: unknown[]; dataRows: unknown[][] } {
   const headerRow = allRows[headerRowIndex] ?? [];
-  const dataRows = allRows
-    .slice(headerRowIndex + 1)
-    .filter((r) => r.some((c) => c !== null && c !== ''));
+  const dataRows = allRows.slice(headerRowIndex + 1).filter((r) => r.some((c) => c !== null && c !== ''));
   return { headerRow, dataRows };
 }
 
-function resolveColIndex(
-  key: string | number | undefined,
-  headerRow: unknown[],
-): number | null {
+function resolveColIndex(key: string | number | undefined, headerRow: unknown[]): number | null {
   if (key === undefined || key === null) return null;
   if (typeof key === 'number') return key;
   const lower = key.toLowerCase();
-  const idx = headerRow.findIndex(
-    (h) => typeof h === 'string' && h.toLowerCase().includes(lower),
-  );
+  const idx = headerRow.findIndex((h) => typeof h === 'string' && h.toLowerCase().includes(lower));
   return idx >= 0 ? idx : null;
 }
 
@@ -104,64 +89,33 @@ interface ResolvedCols {
 function resolveColumns(mapping: ColumnMapping, headerRow: unknown[]): ResolvedCols {
   const dateIdx = resolveColIndex(mapping.dateColumn, headerRow);
   if (dateIdx === null) throw new Error('Cannot resolve date column');
-
   const amountIdx = resolveColIndex(mapping.amountColumn, headerRow);
   const descIdx = resolveColIndex(mapping.descriptionColumn, headerRow);
   const cpIdx = resolveColIndex(mapping.counterpartyColumn, headerRow);
   const refIdx = resolveColIndex(mapping.referenceColumn, headerRow);
-
-  const lowerHeaders = headerRow.map((h) =>
-    typeof h === 'string' ? h.toLowerCase() : '',
-  );
+  const lowerHeaders = headerRow.map((h) => typeof h === 'string' ? h.toLowerCase() : '');
   const outKws = ['дебет', 'списание', 'расход', 'debit', 'withdrawal'];
   const inKws = ['кредит', 'поступление', 'приход', 'credit', 'deposit'];
-
   const outIdx = lowerHeaders.findIndex((h) => outKws.some((k) => h.includes(k)));
   const inIdx = lowerHeaders.findIndex((h) => inKws.some((k) => h.includes(k)));
   const hasSplit = outIdx >= 0 && inIdx >= 0 && outIdx !== inIdx;
-
-  return {
-    dateIdx,
-    amountIdx: hasSplit ? null : amountIdx,
-    outIdx: hasSplit ? outIdx : null,
-    inIdx: hasSplit ? inIdx : null,
-    descIdx,
-    cpIdx,
-    refIdx,
-  };
+  return { dateIdx, amountIdx: hasSplit ? null : amountIdx, outIdx: hasSplit ? outIdx : null, inIdx: hasSplit ? inIdx : null, descIdx, cpIdx, refIdx };
 }
 
-function extractSplitAmount(
-  row: unknown[],
-  outIdx: number,
-  inIdx: number,
-): { amount: bigint; direction: 'IN' | 'OUT' } | null {
+function extractSplitAmount(row: unknown[], outIdx: number, inIdx: number): { amount: bigint; direction: 'IN' | 'OUT' } | null {
   const tryAmt = (v: unknown): bigint | null => {
     if (v === null || v === undefined || v === '') return null;
-    try {
-      const n = normalizeAmount(v);
-      return n !== BigInt(0) ? n : null;
-    } catch {
-      return null;
-    }
+    try { const n = normalizeAmount(v); return n !== BigInt(0) ? n : null; } catch { return null; }
   };
-
   const outAmt = tryAmt(row[outIdx]);
-  if (outAmt !== null) {
-    return { amount: outAmt < BigInt(0) ? -outAmt : outAmt, direction: 'OUT' };
-  }
+  if (outAmt !== null) return { amount: outAmt < BigInt(0) ? -outAmt : outAmt, direction: 'OUT' };
   const inAmt = tryAmt(row[inIdx]);
-  if (inAmt !== null) {
-    return { amount: inAmt < BigInt(0) ? -inAmt : inAmt, direction: 'IN' };
-  }
+  if (inAmt !== null) return { amount: inAmt < BigInt(0) ? -inAmt : inAmt, direction: 'IN' };
   return null;
 }
 
-// ── Raw-row parsers ───────────────────────────────────────────────────────────
-
 function parseXlsxRaw(buffer: Buffer): unknown[][] {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const XLSX = require('xlsx') as typeof import('xlsx');
+  const XLSX = require('xlsx');
   const wb = XLSX.read(buffer, { type: 'buffer', cellDates: false });
   const sheet = wb.Sheets[wb.SheetNames[0]];
   if (!sheet) return [];
@@ -169,37 +123,20 @@ function parseXlsxRaw(buffer: Buffer): unknown[][] {
 }
 
 function parseCsvRaw(buffer: Buffer): unknown[][] {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const Papa = require('papaparse') as typeof import('papaparse');
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const iconv = require('iconv-lite') as typeof import('iconv-lite');
-
+  const Papa = require('papaparse');
+  const iconv = require('iconv-lite');
   const tryParse = (enc: string): unknown[][] => {
     try {
       const str = iconv.decode(buffer, enc);
-      const r = Papa.parse<string[]>(str, {
-        header: false,
-        skipEmptyLines: false,
-        dynamicTyping: false,
-      });
+      const r = Papa.parse<string[]>(str, { header: false, skipEmptyLines: false, dynamicTyping: false });
       return r.data as unknown[][];
-    } catch {
-      return [];
-    }
+    } catch { return []; }
   };
-
   const utf8 = tryParse('utf-8');
   const win = tryParse('windows-1251');
-  const cyrCount = (rows: unknown[][]) =>
-    rows
-      .slice(0, 4)
-      .flat()
-      .filter((c) => typeof c === 'string' && /[а-яА-ЯёЁ]/.test(c)).length;
-
+  const cyrCount = (rows: unknown[][]) => rows.slice(0, 4).flat().filter((c) => typeof c === 'string' && /[а-яА-ЯёЁ]/.test(c)).length;
   return cyrCount(win) > cyrCount(utf8) ? win : utf8;
 }
-
-// ── Main handler ──────────────────────────────────────────────────────────────
 
 export async function handleParseBank(job: Job): Promise<void> {
   console.time('[parseBank] total');
@@ -208,7 +145,6 @@ export async function handleParseBank(job: Job): Promise<void> {
 
   const imp = await findImportById(importId);
   if (!imp) throw new Error(`Import not found: ${importId}`);
-
   if (imp.status === 'COMPLETED' || imp.status === 'FAILED') return;
 
   const user = await findUserById(imp.user_id);
@@ -230,9 +166,7 @@ export async function handleParseBank(job: Job): Promise<void> {
   }
   console.timeEnd('[parseBank] loadFile');
 
-  const ext = (imp.original_filename ?? imp.storage_path ?? '').toLowerCase().endsWith('.csv')
-    ? 'csv'
-    : 'xlsx';
+  const ext = (imp.original_filename ?? imp.storage_path ?? '').toLowerCase().endsWith('.csv') ? 'csv' : 'xlsx';
 
   console.time('[parseBank] detectHeaderAndColumns');
   let detection: HeaderDetectionResult | null;
@@ -242,10 +176,7 @@ export async function handleParseBank(job: Job): Promise<void> {
     const reason = `Header detection error: ${err instanceof Error ? err.message : String(err)}`;
     await updateImport(importId, { status: 'FAILED', failure_reason: reason });
     if (user?.telegram_id) {
-      notifyUser(
-        user.telegram_id,
-        '❌ Не удалось распознать выписку. Попробуйте другой файл или другой формат.',
-      ).catch(console.error);
+      notifyUser(user.telegram_id, '❌ Не удалось распознать выписку. Попробуйте другой файл или другой формат.').catch(console.error);
     }
     return;
   }
@@ -254,10 +185,7 @@ export async function handleParseBank(job: Job): Promise<void> {
   if (!detection) {
     await updateImport(importId, { status: 'FAILED', failure_reason: 'NO_HEADER_DETECTED' });
     if (user?.telegram_id) {
-      notifyUser(
-        user.telegram_id,
-        '❌ Не удалось распознать выписку. Попробуйте другой файл или другой формат.',
-      ).catch(console.error);
+      notifyUser(user.telegram_id, '❌ Не удалось распознать выписку. Попробуйте другой файл или другой формат.').catch(console.error);
     }
     return;
   }
@@ -304,23 +232,16 @@ export async function handleParseBank(job: Job): Promise<void> {
   console.timeEnd('[parseBank] parseRawRows');
 
   if (dataRows.length === 0) {
-    await updateImport(importId, {
-      status: 'FAILED',
-      failure_reason: 'No data rows after header',
-    });
+    await updateImport(importId, { status: 'FAILED', failure_reason: 'No data rows after header' });
     if (user?.telegram_id) {
       notifyUser(user.telegram_id, '❌ Выписка не содержит строк с данными.').catch(console.error);
     }
     return;
   }
-
   if (dataRows.length > ROW_LIMIT) {
     await updateImport(importId, { status: 'FAILED', failure_reason: 'ROW_LIMIT_EXCEEDED' });
     if (user?.telegram_id) {
-      notifyUser(
-        user.telegram_id,
-        `❌ Файл выписки содержит слишком много строк (${dataRows.length}). Максимум ${ROW_LIMIT}.`,
-      ).catch(console.error);
+      notifyUser(user.telegram_id, `❌ Файл выписки содержит слишком много строк (${dataRows.length}). Максимум ${ROW_LIMIT}.`).catch(console.error);
     }
     return;
   }
@@ -332,15 +253,10 @@ export async function handleParseBank(job: Job): Promise<void> {
     try {
       cols = resolveColumns(detection.columnMapping, headerRow);
     } catch (err2) {
-      const reason = `Column resolution failed: ${
-        err2 instanceof Error ? err2.message : String(err2)
-      }`;
+      const reason = `Column resolution failed: ${err2 instanceof Error ? err2.message : String(err2)}`;
       await updateImport(importId, { status: 'FAILED', failure_reason: reason });
       if (user?.telegram_id) {
-        notifyUser(
-          user.telegram_id,
-          '❌ Не удалось распознать выписку. Попробуйте другой файл или другой формат.',
-        ).catch(console.error);
+        notifyUser(user.telegram_id, '❌ Не удалось распознать выписку. Попробуйте другой файл или другой формат.').catch(console.error);
       }
       return;
     }
@@ -360,13 +276,7 @@ export async function handleParseBank(job: Job): Promise<void> {
     try {
       txDate = normalizeDate(row[cols.dateIdx]);
     } catch (e) {
-      errors.push({
-        import_id: importId,
-        row_number: rowNumber,
-        error_code: 'INVALID_DATE',
-        error_message: e instanceof Error ? e.message : String(e),
-        raw_fragment: rawFragment,
-      });
+      errors.push({ import_id: importId, row_number: rowNumber, error_code: 'INVALID_DATE', error_message: e instanceof Error ? e.message : String(e), raw_fragment: rawFragment });
       continue;
     }
 
@@ -376,13 +286,7 @@ export async function handleParseBank(job: Job): Promise<void> {
     if (cols.outIdx !== null && cols.inIdx !== null) {
       const split = extractSplitAmount(row, cols.outIdx, cols.inIdx);
       if (!split) {
-        errors.push({
-          import_id: importId,
-          row_number: rowNumber,
-          error_code: 'INVALID_AMOUNT',
-          error_message: 'Both debit and credit cells are empty',
-          raw_fragment: rawFragment,
-        });
+        errors.push({ import_id: importId, row_number: rowNumber, error_code: 'INVALID_AMOUNT', error_message: 'Both debit and credit cells are empty', raw_fragment: rawFragment });
         continue;
       }
       amountKopeks = split.amount;
@@ -390,53 +294,22 @@ export async function handleParseBank(job: Job): Promise<void> {
     } else if (cols.amountIdx !== null) {
       try {
         const raw = normalizeAmount(row[cols.amountIdx]);
-        if (raw < BigInt(0)) {
-          amountKopeks = -raw;
-          direction = 'OUT';
-        } else {
-          amountKopeks = raw;
-          direction = 'IN';
-        }
+        if (raw < BigInt(0)) { amountKopeks = -raw; direction = 'OUT'; }
+        else { amountKopeks = raw; direction = 'IN'; }
       } catch (e) {
-        errors.push({
-          import_id: importId,
-          row_number: rowNumber,
-          error_code: 'INVALID_AMOUNT',
-          error_message: e instanceof Error ? e.message : String(e),
-          raw_fragment: rawFragment,
-        });
+        errors.push({ import_id: importId, row_number: rowNumber, error_code: 'INVALID_AMOUNT', error_message: e instanceof Error ? e.message : String(e), raw_fragment: rawFragment });
         continue;
       }
     } else {
-      errors.push({
-        import_id: importId,
-        row_number: rowNumber,
-        error_code: 'NO_AMOUNT_COLUMN',
-        error_message: 'No amount column could be resolved',
-        raw_fragment: rawFragment,
-      });
+      errors.push({ import_id: importId, row_number: rowNumber, error_code: 'NO_AMOUNT_COLUMN', error_message: 'No amount column could be resolved', raw_fragment: rawFragment });
       continue;
     }
 
-    const reference =
-      cols.refIdx !== null ? normalizeText(row[cols.refIdx]) || null : null;
-    const description =
-      cols.descIdx !== null ? normalizeText(row[cols.descIdx]) || null : null;
-    const counterparty =
-      cols.cpIdx !== null ? normalizeText(row[cols.cpIdx]) || null : null;
+    const reference = cols.refIdx !== null ? normalizeText(row[cols.refIdx]) || null : null;
+    const description = cols.descIdx !== null ? normalizeText(row[cols.descIdx]) || null : null;
+    const counterparty = cols.cpIdx !== null ? normalizeText(row[cols.cpIdx]) || null : null;
 
-    const rowHash = sha256(
-      Buffer.from(
-        JSON.stringify({
-          importId,
-          rowNumber,
-          txDate: txDate.toISOString(),
-          amountKopeks: String(amountKopeks),
-          direction,
-          reference,
-        }),
-      ),
-    );
+    const rowHash = sha256(Buffer.from(JSON.stringify({ importId, rowNumber, txDate: txDate.toISOString(), amountKopeks: String(amountKopeks), direction, reference })));
 
     transactions.push({
       import_id: importId,
@@ -467,19 +340,13 @@ export async function handleParseBank(job: Job): Promise<void> {
   const totalRows = dataRows.length;
   const successRows = transactions.length;
   const errorCount = errors.length;
-  const parseSuccessRate =
-    totalRows > 0 ? ((successRows / totalRows) * 100).toFixed(2) : '0.00';
+  const parseSuccessRate = totalRows > 0 ? ((successRows / totalRows) * 100).toFixed(2) : '0.00';
 
-  const lowConfThreshold =
-    (await getSetting<number>('low_confidence_threshold')) ?? 0.6;
+  const lowConfThreshold = (await getSetting<number>('low_confidence_threshold')) ?? 0.6;
   const rate = parseFloat(parseSuccessRate);
-  let qualityStatus: 'HIGH_CONFIDENCE' | 'LOW_CONFIDENCE' | 'MANUAL_REVIEW' =
-    'HIGH_CONFIDENCE';
-  if (rate < 70) {
-    qualityStatus = 'MANUAL_REVIEW';
-  } else if (profileConfidence < lowConfThreshold || rate < 90) {
-    qualityStatus = 'LOW_CONFIDENCE';
-  }
+  let qualityStatus: 'HIGH_CONFIDENCE' | 'LOW_CONFIDENCE' | 'MANUAL_REVIEW' = 'HIGH_CONFIDENCE';
+  if (rate < 70) qualityStatus = 'MANUAL_REVIEW';
+  else if (profileConfidence < lowConfThreshold || rate < 90) qualityStatus = 'LOW_CONFIDENCE';
 
   let periodStart: string | null = null;
   let periodEnd: string | null = null;
@@ -489,7 +356,6 @@ export async function handleParseBank(job: Job): Promise<void> {
     periodEnd = sorted[sorted.length - 1].toISOString().slice(0, 10);
   }
 
-  console.time('[parseBank] updateImport');
   await updateImport(importId, {
     status: 'COMPLETED',
     quality_status: qualityStatus,
@@ -500,53 +366,43 @@ export async function handleParseBank(job: Job): Promise<void> {
     parser_version: PARSER_VERSION,
     failure_reason: null,
   });
-  console.timeEnd('[parseBank] updateImport');
 
-  // updateProfileStats — fire-and-forget
   updateProfileStats(activeProfileId).catch(() => {});
 
-  // ── УВЕДОМЛЕНИЕ И АВТОЗАПУСК (единый блок) ──
+  // ── Уведомление и автозапуск ──
   if (user?.telegram_id) {
     try {
-      // Проверяем, есть ли уже готовый WB‑отчёт
-      const wbImports = await findImportsByUserId(user.id, {
-        sourceType: 'WB',
-        status: 'COMPLETED',
-        limit: 1,
-      });
+      const wbImports = await findImportsByUserId(user.id, { sourceType: 'WB', status: 'COMPLETED', limit: 1 });
       const hasWb = wbImports.length > 0;
 
       let message = '';
       if (qualityStatus === 'MANUAL_REVIEW') {
-        message = `⚠️ Файл обработан, но значительная часть строк не распознана (ошибок: ${errorCount}). Результаты сверки могут быть неполными. Мы проверим формат вашей выписки.`;
+        message = `⚠️ Файл обработан, но значительная часть строк не распознана (ошибок: ${errorCount}). Результаты сверки могут быть неполными.`;
       } else if (profileStatus === 'MATCHED') {
         message = `✅ Выписка обработана. Использован профиль банка: «${profileDisplayName}». Распознано строк: ${successRows}, ошибок: ${errorCount}.`;
         if (qualityStatus === 'LOW_CONFIDENCE') {
           message += '\n\n⚠️ Выписка была распознана с низкой уверенностью. Результаты сверки могут быть неточны.';
         }
       } else {
-        message = `⚠️ Выписка обработана, но структура банка новая. Создан черновик профиля. Точность распознавания может быть ниже. Рекомендуем проверить отчёт.`;
+        message = `⚠️ Выписка обработана, но структура банка новая. Создан черновик профиля. Точность распознавания может быть ниже.`;
       }
 
       if (hasWb) {
         message += '\n\nГотово. Теперь можно запустить сверку.';
-        notifyUser(user.telegram_id, message).catch(console.error);
+        await notifyUser(user.telegram_id, message);
 
-        // Автоматически запускаем сверку
+        // Автозапуск сверки
         const { startReconciliation } = await import('@/src/lib/reconciliation/startRun');
-        const result = await startReconciliation({
-          userId: user.id,
-          wbImportId: wbImports[0].id,
-          bankImportId: importId,
-        });
-        if ('error' in result) {
-          console.log('[parseBank] Auto-reconciliation failed:', result.error);
+        const result = await startReconciliation({ userId: user.id, wbImportId: wbImports[0].id, bankImportId: importId });
+        if (!('error' in result)) {
+          await enqueue('reconcile', result.run_id, { run_id: result.run_id });
+          await notifyUser(user.telegram_id, `Сверка запущена. Обычно занимает до минуты. Статус: /sync_status ${result.run_id}.`);
         } else {
-          console.log('[parseBank] Auto-reconciliation started with run_id:', result.run_id);
+          console.log('[parseBank] Auto-reconciliation failed:', result.error);
         }
       } else {
         message += '\n\nТеперь можно загрузить отчёт WB.';
-        notifyUser(user.telegram_id, message).catch(console.error);
+        await notifyUser(user.telegram_id, message);
       }
     } catch (err) {
       console.error('[parseBank] Notification/auto-reconciliation error:', err);
