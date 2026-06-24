@@ -1,6 +1,6 @@
 import type { Job } from '@/src/db/repositories/jobs';
 import { loadFile } from '@/src/lib/ingestion/storage';
-import { findImportById, updateImport } from '@/src/db/repositories/imports';
+import { findImportById, updateImport, findImportsByUserId } from '@/src/db/repositories/imports';
 import { findUserById } from '@/src/db/repositories/users';
 import {
   createTransactions,
@@ -505,34 +505,34 @@ export async function handleParseBank(job: Job): Promise<void> {
   // updateProfileStats — fire-and-forget
   updateProfileStats(activeProfileId).catch(() => {});
 
-  // ── ОТПРАВКА УВЕДОМЛЕНИЙ (fire-and-forget) ──
-  if (user?.telegram_id) {
-    console.log(`[parseBank] Building notification for ${user.telegram_id}`);
-    let message = '';
-    if (qualityStatus === 'MANUAL_REVIEW') {
-      message = `⚠️ Файл обработан, но значительная часть строк не распознана (ошибок: ${errorCount}). Результаты сверки могут быть неполными. Мы проверим формат вашей выписки.`;
-    } else if (profileStatus === 'MATCHED') {
-      message = `✅ Выписка обработана. Использован профиль банка: «${profileDisplayName}». Распознано строк: ${successRows}, ошибок: ${errorCount}.`;
-      if (qualityStatus === 'LOW_CONFIDENCE') {
-        message += '\n\n⚠️ Выписка была распознана с низкой уверенностью. Результаты сверки могут быть неточны.';
-      }
-    } else {
-      message = `⚠️ Выписка обработана, но структура банка новая. Создан черновик профиля. Точность распознавания может быть ниже. Рекомендуем проверить отчёт.`;
-    }
-    message += '\n\nГотово. Теперь можно запустить сверку.';
-
-    // Отправляем в фоне, не ждём ответа
-    notifyUser(user.telegram_id, message).catch((err) => {
-      console.error('[parseBank] Background notification failed:', err);
-    });
-  }
-  // ── АВТОМАТИЧЕСКИЙ ЗАПУСК СВЕРКИ ──
+  // ── УВЕДОМЛЕНИЕ И АВТОЗАПУСК (единый блок) ──
   if (user?.telegram_id) {
     try {
-      const { findImportsByUserId } = await import('@/src/db/repositories/imports');
-      const wbImports = await findImportsByUserId(user.id, { sourceType: 'WB', status: 'COMPLETED' });
-      if (wbImports.length > 0) {
-        console.log('[parseBank] Found completed WB import, starting reconciliation automatically');
+      // Проверяем, есть ли уже готовый WB‑отчёт
+      const wbImports = await findImportsByUserId(user.id, {
+        sourceType: 'WB',
+        status: 'COMPLETED',
+        limit: 1,
+      });
+      const hasWb = wbImports.length > 0;
+
+      let message = '';
+      if (qualityStatus === 'MANUAL_REVIEW') {
+        message = `⚠️ Файл обработан, но значительная часть строк не распознана (ошибок: ${errorCount}). Результаты сверки могут быть неполными. Мы проверим формат вашей выписки.`;
+      } else if (profileStatus === 'MATCHED') {
+        message = `✅ Выписка обработана. Использован профиль банка: «${profileDisplayName}». Распознано строк: ${successRows}, ошибок: ${errorCount}.`;
+        if (qualityStatus === 'LOW_CONFIDENCE') {
+          message += '\n\n⚠️ Выписка была распознана с низкой уверенностью. Результаты сверки могут быть неточны.';
+        }
+      } else {
+        message = `⚠️ Выписка обработана, но структура банка новая. Создан черновик профиля. Точность распознавания может быть ниже. Рекомендуем проверить отчёт.`;
+      }
+
+      if (hasWb) {
+        message += '\n\nГотово. Теперь можно запустить сверку.';
+        notifyUser(user.telegram_id, message).catch(console.error);
+
+        // Автоматически запускаем сверку
         const { startReconciliation } = await import('@/src/lib/reconciliation/startRun');
         const result = await startReconciliation({
           userId: user.id,
@@ -544,10 +544,14 @@ export async function handleParseBank(job: Job): Promise<void> {
         } else {
           console.log('[parseBank] Auto-reconciliation started with run_id:', result.run_id);
         }
+      } else {
+        message += '\n\nТеперь можно загрузить отчёт WB.';
+        notifyUser(user.telegram_id, message).catch(console.error);
       }
     } catch (err) {
-      console.error('[parseBank] Auto-reconciliation error:', err);
+      console.error('[parseBank] Notification/auto-reconciliation error:', err);
     }
   }
+
   console.timeEnd('[parseBank] total');
 }
