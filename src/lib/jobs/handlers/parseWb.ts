@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import { loadFile } from '@/src/lib/ingestion/storage';
 import type { Job } from '@/src/db/repositories/jobs';
-import { findImportById, updateImport } from '@/src/db/repositories/imports';
+import { findImportById, updateImport, findImportsByUserId } from '@/src/db/repositories/imports';
 import { findUserById } from '@/src/db/repositories/users';
 import {
   createTransactions,
@@ -326,7 +326,6 @@ export async function handleParseWb(job: Job): Promise<void> {
         currency: 'RUB',
         direction: c.direction,
         reference,
-        // Исправление: для payout и возврат не добавляем дополнительный тег
         description:
           c.kind === 'payout' || c.kind === 'возврат' ? description : `${description ?? ''} [${c.kind}]`.trim(),
         counterparty,
@@ -380,26 +379,30 @@ export async function handleParseWb(job: Job): Promise<void> {
   });
   console.timeEnd('[parseWb] updateImport');
 
-  // ── ОТПРАВКА УВЕДОМЛЕНИЙ (fire-and-forget) ──
-  if (user?.telegram_id) {
-    console.log(`[parseWb] Building notification for ${user.telegram_id}`);
-    let message = `✅ Отчёт WB обработан. Загружено строк: ${successRows}, ошибок: ${errorCount}. Теперь можно загрузить выписку банка.`;
-    if (qualityStatus === 'MANUAL_REVIEW') {
-      message += `\n\n⚠️ Файл обработан, но значительная часть строк не распознана (ошибок: ${errorCount}). Результаты сверки могут быть неполными. Мы проверим формат вашей выписки.`;
-    }
-    // Отправляем в фоне
-    notifyUser(user.telegram_id, message).catch((err) => {
-      console.error('[parseWb] Background notification failed:', err);
-    });
-  }
-
-  // ── АВТОМАТИЧЕСКИЙ ЗАПУСК СВЕРКИ ──
+  // ── УВЕДОМЛЕНИЕ И АВТОЗАПУСК (единый блок) ──
   if (user?.telegram_id) {
     try {
-      const { findImportsByUserId } = await import('@/src/db/repositories/imports');
-      const bankImports = await findImportsByUserId(user.id, { sourceType: 'BANK', status: 'COMPLETED' });
-      if (bankImports.length > 0) {
-        console.log('[parseWb] Found completed BANK import, starting reconciliation automatically');
+      // Проверяем, есть ли уже готовая выписка
+      const bankImports = await findImportsByUserId(user.id, {
+        sourceType: 'BANK',
+        status: 'COMPLETED',
+        limit: 1,
+      });
+      const hasBank = bankImports.length > 0;
+
+      let message = '';
+      if (qualityStatus === 'MANUAL_REVIEW') {
+        message = `⚠️ Файл обработан, но значительная часть строк не распознана (ошибок: ${errorCount}). Результаты сверки могут быть неполными. Мы проверим формат вашей выписки.`;
+      } else {
+        message = `✅ Отчёт WB обработан. Загружено строк: ${successRows}, ошибок: ${errorCount}.`;
+      }
+
+      if (hasBank) {
+        message += '\n\nГотово. Теперь можно запустить сверку.';
+        // Отправляем уведомление о готовности
+        notifyUser(user.telegram_id, message).catch(console.error);
+
+        // Автоматически запускаем сверку
         const { startReconciliation } = await import('@/src/lib/reconciliation/startRun');
         const result = await startReconciliation({
           userId: user.id,
@@ -411,9 +414,12 @@ export async function handleParseWb(job: Job): Promise<void> {
         } else {
           console.log('[parseWb] Auto-reconciliation started with run_id:', result.run_id);
         }
+      } else {
+        message += '\n\nТеперь можно загрузить выписку банка.';
+        notifyUser(user.telegram_id, message).catch(console.error);
       }
     } catch (err) {
-      console.error('[parseWb] Auto-reconciliation error:', err);
+      console.error('[parseWb] Notification/auto-reconciliation error:', err);
     }
   }
 
