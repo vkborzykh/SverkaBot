@@ -1,6 +1,7 @@
 import { findUserByTelegramId } from '@/src/db/repositories/users';
 import { checkAccess } from '@/src/lib/telegram/access';
 import { startReconciliation } from '@/src/lib/reconciliation/startRun';
+import { enqueue } from '@/src/lib/jobs/queue';
 import { msg } from '@/src/lib/telegram/messages.ru';
 import type { BotContext } from '@/src/lib/telegram/router';
 
@@ -35,14 +36,16 @@ export async function handleRunSync(ctx: BotContext): Promise<void> {
     return;
   }
 
-  // In-process call — no self-HTTP to /api/reconciliation/run (that was the
-  // source of "Не удалось запустить сверку" even when both files were present).
   try {
     const result = await startReconciliation({ userId: user.id });
     if ('error' in result) {
       await ctx.reply(errorCodeToRussian(result.error.code));
       return;
     }
+
+    // Ставим задачу в очередь
+    await enqueue('reconcile', result.run_id, { run_id: result.run_id });
+    // Отправляем сообщение о запуске
     await ctx.reply(msg.syncStarted(result.run_id));
   } catch (err) {
     console.error('[runSync] failed:', err);
