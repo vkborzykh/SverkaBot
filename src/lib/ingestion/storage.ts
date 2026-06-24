@@ -18,6 +18,15 @@ function contentTypeForExt(ext: string): string {
   return 'application/octet-stream';
 }
 
+// Скачивает отчёт из бакета sverkabot по пути storage_path
+export async function downloadReport(path: string): Promise<Buffer> {
+  const supabase = createClient(); // Используйте ваш готовый клиент Supabase
+  const { data, error } = await supabase.storage.from('sverkabot').download(path);
+  if (error) throw error;
+  const arrayBuffer = await data.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
 export async function storeFile(
   userId: string,
   fileHash: string,
