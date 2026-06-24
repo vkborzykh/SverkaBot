@@ -160,4 +160,20 @@ export async function handleReportExport(job: Job): Promise<void> {
     report_version: 1,
     is_primary: true,
   });
+
+  // Уведомить Vercel отправить файл пользователю
+  if (process.env.PUBLIC_URL) {
+    try {
+      await fetch(`${process.env.PUBLIC_URL}/api/reports/deliver`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Internal-Token': process.env.INTERNAL_TOKEN || '',
+        },
+        body: JSON.stringify({ run_id: runId }),
+      });
+    } catch (e) {
+      console.error('[reportExport] failed to notify delivery endpoint:', e);
+    }
+  }
 }
