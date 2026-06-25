@@ -3,19 +3,6 @@ import { findImportById } from '@/src/db/repositories/imports';
 import { msg } from '@/src/lib/telegram/messages.ru';
 import type { BotContext } from '@/src/lib/telegram/router';
 
-function qualityRu(q: string | null | undefined): string {
-  switch (q) {
-    case 'HIGH_CONFIDENCE':
-      return 'высокое';
-    case 'LOW_CONFIDENCE':
-      return 'низкое';
-    case 'MANUAL_REVIEW':
-      return 'требует проверки';
-    default:
-      return '—';
-  }
-}
-
 export async function handleStatus(ctx: BotContext): Promise<void> {
   const from = ctx.from;
   if (!from) return;
@@ -45,21 +32,31 @@ export async function handleStatus(ctx: BotContext): Promise<void> {
       break;
     case 'ANALYZING':
     case 'PARSING':
+    case 'RUNNING':
       await ctx.reply(msg.importStatusProcessing);
-      break;
-    case 'COMPLETED':
-      await ctx.reply(
-        msg.importStatusCompleted(
-          qualityRu(imp.quality_status),
-          imp.parse_success_rate ?? '0',
-          imp.error_count ?? 0,
-        ),
-      );
       break;
     case 'FAILED':
       await ctx.reply(msg.importStatusFailed);
       break;
+    case 'COMPLETED': {
+      const qualityLabel =
+        imp.quality_status === 'NORMAL'
+          ? 'высокое'
+          : imp.quality_status === 'LOW_CONFIDENCE'
+            ? 'низкое'
+            : imp.quality_status === 'MANUAL_REVIEW'
+              ? 'требуется проверка'
+              : '—';
+      await ctx.reply(
+        msg.importStatusCompleted(
+          qualityLabel,
+          imp.parse_success_rate ?? '—',
+          imp.error_count ?? 0,
+        ),
+      );
+      break;
+    }
     default:
-      await ctx.reply(msg.importStatusProcessing);
+      break;
   }
 }
