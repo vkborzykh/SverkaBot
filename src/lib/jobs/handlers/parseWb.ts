@@ -243,6 +243,7 @@ export async function handleParseWb(job: Job): Promise<void> {
       transactions.push({
         import_id: importId,
         source_type: 'WB',
+        marketplace: 'WB',          // ← ДОБАВЛЕНО
         row_number: rowNumber,
         transaction_date: txDate,
         amount_kopeks: c.amount,
@@ -272,7 +273,8 @@ export async function handleParseWb(job: Job): Promise<void> {
   const errorCount = errors.length;
   const parseSuccessRate = totalRows > 0 ? ((successRows / totalRows) * 100).toFixed(2) : '0.00';
 
-  let qualityStatus: 'HIGH_CONFIDENCE' | 'LOW_CONFIDENCE' | 'MANUAL_REVIEW' = 'HIGH_CONFIDENCE';
+  // HIGH_CONFIDENCE → NORMAL
+  let qualityStatus: 'NORMAL' | 'LOW_CONFIDENCE' | 'MANUAL_REVIEW' = 'NORMAL';
   if (parseFloat(parseSuccessRate) < 70) qualityStatus = 'MANUAL_REVIEW';
 
   let periodStart: string | null = null;
@@ -311,7 +313,6 @@ export async function handleParseWb(job: Job): Promise<void> {
         message += '\n\nГотово. Теперь можно запустить сверку.';
         await notifyUser(user.telegram_id, message);
 
-        // Автозапуск сверки
         const { startReconciliation } = await import('@/src/lib/reconciliation/startRun');
         const result = await startReconciliation({ userId: user.id, wbImportId: importId, bankImportId: bankImports[0].id });
         if (!('error' in result)) {
