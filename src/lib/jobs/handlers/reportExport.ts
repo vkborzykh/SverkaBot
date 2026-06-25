@@ -151,8 +151,10 @@ export async function handleReportExport(job: Job): Promise<void> {
   });
 
   const htmlBuffer = Buffer.from(htmlReport, 'utf-8');
-  const storagePath = await storeReport(runId, htmlBuffer);
+  // Сохраняем HTML с правильным расширением
+  const storagePath = await storeReport(runId, htmlBuffer, 'text/html');
 
+  // Создаём запись в БД
   await createReport({
     run_id: runId,
     storage_path: storagePath,
@@ -161,14 +163,14 @@ export async function handleReportExport(job: Job): Promise<void> {
     is_primary: true,
   });
 
-  // Уведомить Vercel отправить файл пользователю
-  if (process.env.PUBLIC_URL) {
+  // Доставка через Vercel
+  if (process.env.PUBLIC_URL && process.env.INTERNAL_TOKEN) {
     try {
       await fetch(`${process.env.PUBLIC_URL}/api/reports/deliver`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Internal-Token': process.env.INTERNAL_TOKEN || '',
+          'X-Internal-Token': process.env.INTERNAL_TOKEN,
         },
         body: JSON.stringify({ run_id: runId }),
       });
