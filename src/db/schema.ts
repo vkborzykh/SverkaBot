@@ -17,6 +17,7 @@ import { sql } from 'drizzle-orm';
 import {
   subscriptionStatusEnum,
   importSourceEnum,
+  marketplaceEnum,
   importStatusEnum,
   qualityStatusEnum,
   profileStatusEnum,
@@ -43,6 +44,7 @@ export const users = pgTable(
     subscription_end_date: timestamp('subscription_end_date', {
       withTimezone: true,
     }),
+    has_used_trial: boolean('has_used_trial').notNull().default(false),
     last_update_id: bigint('last_update_id', { mode: 'bigint' }),
     created_at: timestamp('created_at', { withTimezone: true })
       .defaultNow()
@@ -56,6 +58,7 @@ export const users = pgTable(
     uniqueIndex('users_telegram_id_idx').on(t.telegram_id),
     index('users_subscription_status_idx').on(t.subscription_status),
     index('users_subscription_end_date_idx').on(t.subscription_end_date),
+    index('users_has_used_trial_idx').on(t.has_used_trial),
     check(
       'users_end_date_check',
       sql`subscription_end_date IS NULL OR subscription_end_date >= created_at`,
@@ -102,6 +105,7 @@ export const statement_profiles = pgTable(
     usage_count: integer('usage_count').default(0),
     success_rate: decimal('success_rate', { precision: 5, scale: 2 }),
     config_json: jsonb('config_json'),
+    marketplace: marketplaceEnum('marketplace').notNull().default('WB'),
     created_by: uuid('created_by').references(() => users.id, {
       onDelete: 'set null',
     }),
@@ -133,6 +137,7 @@ export const imports = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
     source_type: importSourceEnum('source_type'),
+    marketplace: marketplaceEnum('marketplace'),
     storage_path: text('storage_path'),
     original_filename: text('original_filename'),
     file_hash: text('file_hash'),
@@ -155,6 +160,7 @@ export const imports = pgTable(
       scale: 2,
     }),
     error_count: integer('error_count'),
+    delimiter: text('delimiter'),
     failure_reason: text('failure_reason'),
     created_at: timestamp('created_at', { withTimezone: true })
       .defaultNow()
@@ -170,6 +176,10 @@ export const imports = pgTable(
     index('imports_status_idx').on(t.status),
     index('imports_created_at_idx').on(t.created_at),
     index('imports_file_hash_idx').on(t.file_hash),
+    index('imports_marketplace_idx').on(t.marketplace),
+    uniqueIndex('imports_dedup_unique_idx')
+      .on(t.user_id, t.source_type, t.file_hash)
+      .where(sql`${t.deleted_at} IS NULL`),
     check(
       'imports_parse_success_rate_check',
       sql`parse_success_rate IS NULL OR (parse_success_rate >= 0 AND parse_success_rate <= 100)`,
@@ -214,6 +224,7 @@ export const canonical_transactions = pgTable(
       .notNull()
       .references(() => imports.id, { onDelete: 'cascade' }),
     source_type: importSourceEnum('source_type'),
+    marketplace: marketplaceEnum('marketplace'),
     row_number: integer('row_number'),
     transaction_date: timestamp('transaction_date', { withTimezone: true }),
     amount_kopeks: bigint('amount_kopeks', { mode: 'bigint' }),
