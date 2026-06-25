@@ -105,6 +105,7 @@ async function handleFileUpload(
     const newImport = await createImport({
       user_id: user.id,
       source_type: sourceType,
+      marketplace: sourceType === 'WB' ? 'WB' : null,   // ← ДОБАВЛЕНО
       storage_path: storagePath,
       original_filename: doc.fileName,
       file_hash: fileHash,
@@ -121,15 +122,11 @@ async function handleFileUpload(
     if (sourceType === 'WB') {
       await ctx.reply(msg.uploadWbReceived(newImport.id));
     } else {
-      // Для BANK добавляем ID в сообщение
       await ctx.reply(msg.uploadBankReceived(newImport.id));
     }
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     console.error('[upload] failed to store/enqueue:', err);
-    // During testing, show the real cause to admins (or when DEBUG_UPLOAD_ERRORS
-    // is set) so the operator doesn't have to dig through Vercel logs. Regular
-    // users always get the generic message.
     const showDetail =
       isAdmin(telegramId) || process.env.DEBUG_UPLOAD_ERRORS === 'true';
     await ctx.reply(showDetail ? `${msg.uploadError}\n\n🔧 ${detail}` : msg.uploadError);
