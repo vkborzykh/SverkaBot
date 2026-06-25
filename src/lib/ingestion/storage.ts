@@ -1,27 +1,28 @@
 import { getSupabaseAdmin, STORAGE_BUCKET } from '@/src/lib/supabase/client';
 
-// Files live in Supabase Storage (persistent across serverless invocations).
-// Object keys are kept identical to the previous local-FS layout so existing
-// `imports.storage_path` / `reports.storage_path` values remain valid:
-//   imports/{userId}/{fileHash}.{ext}
-//   reports/{runId}/report.zip
-
 function isTest(): boolean {
   return process.env.NODE_ENV === 'test';
 }
 
 function contentTypeForExt(ext: string): string {
   if (ext === 'csv') return 'text/csv';
-  if (ext === 'xlsx') {
-    return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-  }
+  if (ext === 'xlsx') return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  if (ext === 'html') return 'text/html';
   return 'application/octet-stream';
+}
+
+function extForMime(mimeType: string): string {
+  if (mimeType === 'text/html') return 'html';
+  if (mimeType === 'application/zip') return 'zip';
+  if (mimeType === 'text/csv') return 'csv';
+  if (mimeType.includes('spreadsheetml')) return 'xlsx';
+  return 'bin';
 }
 
 // Скачивает отчёт из бакета sverkabot по пути storage_path
 export async function downloadReport(path: string): Promise<Buffer> {
-  const supabase = createClient(); // Используйте ваш готовый клиент Supabase
-  const { data, error } = await supabase.storage.from('sverkabot').download(path);
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase.storage.from(STORAGE_BUCKET).download(path);
   if (error) throw error;
   const arrayBuffer = await data.arrayBuffer();
   return Buffer.from(arrayBuffer);
@@ -46,13 +47,21 @@ export async function storeFile(
   return storagePath;
 }
 
-export async function storeReport(runId: string, buffer: Buffer): Promise<string> {
-  const storagePath = `reports/${runId}/report.zip`;
+export async function storeReport(
+  runId: string,
+  buffer: Buffer,
+  mimeType: string = 'application/zip'
+): Promise<string> {
+  const ext = extForMime(mimeType);
+  const storagePath = `reports/${runId}/report.${ext}`;
   if (isTest()) return storagePath;
 
   const { error } = await getSupabaseAdmin()
     .storage.from(STORAGE_BUCKET)
-    .upload(storagePath, buffer, { contentType: 'application/zip', upsert: true });
+    .upload(storagePath, buffer, {
+      contentType: mimeType,
+      upsert: true,
+    });
   if (error) throw new Error(`Storage upload failed (${storagePath}): ${error.message}`);
   return storagePath;
 }
@@ -71,7 +80,6 @@ export async function loadFile(storagePath: string): Promise<Buffer> {
 
 export async function deleteFile(storagePath: string): Promise<void> {
   if (isTest()) return;
-  // remove() is idempotent: missing objects are not an error.
   const { error } = await getSupabaseAdmin()
     .storage.from(STORAGE_BUCKET)
     .remove([storagePath]);
