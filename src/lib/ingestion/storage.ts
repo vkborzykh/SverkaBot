@@ -11,7 +11,6 @@ function contentTypeForExt(ext: string): string {
   return 'application/octet-stream';
 }
 
-// Скачивает отчёт из бакета sverkabot по пути storage_path
 export async function downloadReport(path: string): Promise<Buffer> {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase.storage.from(STORAGE_BUCKET).download(path);
@@ -31,10 +30,7 @@ export async function storeFile(
 
   const { error } = await getSupabaseAdmin()
     .storage.from(STORAGE_BUCKET)
-    .upload(storagePath, buffer, {
-      contentType: contentTypeForExt(ext),
-      upsert: true,
-    });
+    .upload(storagePath, buffer, { contentType: contentTypeForExt(ext), upsert: true });
   if (error) throw new Error(`Storage upload failed (${storagePath}): ${error.message}`);
   return storagePath;
 }
@@ -44,17 +40,13 @@ export async function storeReport(
   buffer: Buffer,
   mimeType: string = 'application/zip'
 ): Promise<string> {
-  // Определяем расширение по MIME-типу
   const ext = mimeType === 'text/html' ? 'html' : 'zip';
   const storagePath = `reports/${runId}/report.${ext}`;
   if (isTest()) return storagePath;
 
   const { error } = await getSupabaseAdmin()
     .storage.from(STORAGE_BUCKET)
-    .upload(storagePath, buffer, {
-      contentType: mimeType,
-      upsert: true,
-    });
+    .upload(storagePath, buffer, { contentType: mimeType, upsert: true });
   if (error) throw new Error(`Storage upload failed (${storagePath}): ${error.message}`);
   return storagePath;
 }
