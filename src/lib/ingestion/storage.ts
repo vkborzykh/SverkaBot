@@ -11,14 +11,6 @@ function contentTypeForExt(ext: string): string {
   return 'application/octet-stream';
 }
 
-function extForMime(mimeType: string): string {
-  if (mimeType === 'text/html') return 'html';
-  if (mimeType === 'application/zip') return 'zip';
-  if (mimeType === 'text/csv') return 'csv';
-  if (mimeType.includes('spreadsheetml')) return 'xlsx';
-  return 'bin';
-}
-
 // Скачивает отчёт из бакета sverkabot по пути storage_path
 export async function downloadReport(path: string): Promise<Buffer> {
   const supabase = getSupabaseAdmin();
@@ -52,7 +44,8 @@ export async function storeReport(
   buffer: Buffer,
   mimeType: string = 'application/zip'
 ): Promise<string> {
-  const ext = extForMime(mimeType);
+  // Определяем расширение по MIME-типу
+  const ext = mimeType === 'text/html' ? 'html' : 'zip';
   const storagePath = `reports/${runId}/report.${ext}`;
   if (isTest()) return storagePath;
 
