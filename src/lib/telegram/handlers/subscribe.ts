@@ -1,46 +1,7 @@
 import type { Context } from 'telegraf';
 import { findUserByTelegramId } from '@/src/db/repositories/users';
-import { getPaymentProvider } from '@/src/lib/billing/provider';
-import {
-  createBillingTransaction,
-  findPendingTransactionByUserId,
-} from '@/src/db/repositories/billing-transactions';
+import { createOrReusePayment } from '@/src/lib/billing/payment';
 import { msg } from '../messages.ru';
-
-const SUBSCRIPTION_AMOUNT_KOPEKS = 150000; // 1500 RUB
-const CURRENCY = 'RUB';
-
-async function getOrCreatePaymentUrl(userId: string): Promise<string> {
-  const provider = getPaymentProvider();
-
-  // Reuse pending transaction if exists
-  const pending = await findPendingTransactionByUserId(userId);
-  if (pending && pending.provider_tx_id) {
-    const { paymentUrl } = await provider.createPayment(
-      SUBSCRIPTION_AMOUNT_KOPEKS,
-      CURRENCY,
-      { userId },
-    );
-    return paymentUrl;
-  }
-
-  const { paymentUrl, providerTxId } = await provider.createPayment(
-    SUBSCRIPTION_AMOUNT_KOPEKS,
-    CURRENCY,
-    { userId, description: 'Подписка SverkaBot 30 дней' },
-  );
-
-  await createBillingTransaction({
-    user_id: userId,
-    amount_kopeks: BigInt(SUBSCRIPTION_AMOUNT_KOPEKS),
-    currency: CURRENCY,
-    status: 'PENDING',
-    provider: 'mock',
-    provider_tx_id: providerTxId,
-  });
-
-  return paymentUrl;
-}
 
 function formatDate(d: Date | null | undefined): string {
   if (!d) return '—';
@@ -62,7 +23,7 @@ export async function handleSubscribe(ctx: Context): Promise<void> {
     return;
   }
 
-  const paymentUrl = await getOrCreatePaymentUrl(user.id);
+  const paymentUrl = await createOrReusePayment(user.id);
 
   switch (user.subscription_status) {
     case 'TRIAL': {
