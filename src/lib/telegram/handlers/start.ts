@@ -2,6 +2,7 @@ import type { Context } from 'telegraf';
 import { findUserByTelegramId, createUser } from '@/src/db/repositories/users';
 import { createConsent } from '@/src/db/repositories/consents';
 import { logAuditEvent } from '@/src/lib/audit/audit';
+import { hasUsedTrial, markTrialUsed } from '@/src/db/repositories/trial-usage';
 import { consentKeyboard, mainMenuKeyboard } from '../keyboard';
 import { msg } from '../messages.ru';
 
@@ -10,7 +11,16 @@ export async function handleStart(ctx: Context): Promise<void> {
   const existing = await findUserByTelegramId(telegramId);
 
   if (existing) {
-    await ctx.reply(msg.consentAccepted(formatDate(existing.trial_expires_at ?? existing.subscription_end_date ?? new Date())), mainMenuKeyboard);
+    await ctx.reply(
+      msg.consentAccepted(
+        formatDate(
+          existing.trial_expires_at ??
+            existing.subscription_end_date ??
+            new Date(),
+        ),
+      ),
+      mainMenuKeyboard,
+    );
     return;
   }
 
@@ -20,14 +30,50 @@ export async function handleStart(ctx: Context): Promise<void> {
 export async function handleConsentAccept(ctx: Context): Promise<void> {
   const telegramId = BigInt(ctx.from!.id);
 
-  // Guard against duplicate processing
+  // Защита от повторной обработки
   const existing = await findUserByTelegramId(telegramId);
   if (existing) {
     await ctx.answerCbQuery();
-    await ctx.reply(msg.consentAccepted(formatDate(existing.trial_expires_at!)), mainMenuKeyboard);
+    await ctx.reply(
+      msg.consentAccepted(
+        formatDate(
+          existing.trial_expires_at ??
+            existing.subscription_end_date ??
+            new Date(),
+        ),
+      ),
+      mainMenuKeyboard,
+    );
     return;
   }
 
+  const usedTrial = await hasUsedTrial(telegramId);
+
+  // Триал уже использован (возможно, до удаления данных) – новый не выдаём
+  if (usedTrial) {
+    const past = new Date(); // удовлетворяет CHECK (EXPIRED требует непустую дату)
+    const user = await createUser({
+      telegram_id: telegramId,
+      username: ctx.from!.username ?? null,
+      subscription_status: 'EXPIRED',
+      trial_expires_at: past,
+      has_used_trial: true,
+      consent_given_at: new Date(),
+    });
+    await createConsent({
+      user_id: user.id,
+      consent_version: '1.0',
+      accepted_at: new Date(),
+    });
+    await logAuditEvent(user.id, 'consent_accepted');
+    await logAuditEvent(user.id, 'trial_denied_reused');
+    await ctx.answerCbQuery();
+    await ctx.editMessageReplyMarkup(undefined);
+    await ctx.reply(msg.trialAlreadyUsed, mainMenuKeyboard);
+    return;
+  }
+
+  // Первичный триал
   const trialExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
   const user = await createUser({
@@ -35,8 +81,11 @@ export async function handleConsentAccept(ctx: Context): Promise<void> {
     username: ctx.from!.username ?? null,
     subscription_status: 'TRIAL',
     trial_expires_at: trialExpiresAt,
+    has_used_trial: true,
     consent_given_at: new Date(),
   });
+
+  await markTrialUsed(telegramId); // сохраняется при удалении данных
 
   await createConsent({
     user_id: user.id,
