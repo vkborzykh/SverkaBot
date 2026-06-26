@@ -85,6 +85,13 @@ export const consents = pgTable(
   (t) => [index('consents_user_id_idx').on(t.user_id)],
 );
 
+// ── trial_usage (trial abuse prevention) ─────────────────────────────────────
+
+export const trial_usage = pgTable('trial_usage', {
+  telegram_id: bigint('telegram_id', { mode: 'bigint' }).primaryKey(),
+  used_at: timestamp('used_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
 // ── statement_profiles ────────────────────────────────────────────────────────
 
 export const statement_profiles = pgTable(
@@ -444,6 +451,7 @@ export const billing_transactions = pgTable(
     status: paymentStatusEnum('status'),
     provider: text('provider'),
     provider_tx_id: text('provider_tx_id'),
+    confirmation_url: text('confirmation_url'),
     created_at: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -454,6 +462,9 @@ export const billing_transactions = pgTable(
   (t) => [
     index('billing_transactions_user_id_idx').on(t.user_id),
     index('billing_transactions_status_idx').on(t.status),
+    uniqueIndex('billing_provider_tx_unique_idx')
+      .on(t.provider_tx_id)
+      .where(sql`${t.provider_tx_id} IS NOT NULL`),
   ],
 );
 
