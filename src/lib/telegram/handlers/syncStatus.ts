@@ -4,9 +4,13 @@ import { msg } from '@/src/lib/telegram/messages.ru';
 import type { BotContext } from '@/src/lib/telegram/router';
 
 function formatAmount(kopeks: bigint | string | null | undefined): string {
-  if (kopeks === null || kopeks === undefined) return '0.00';
-  const n = Number(kopeks);
-  return (n / 100).toFixed(2);
+  if (kopeks === null || kopeks === undefined) return '0,00';
+  const k = typeof kopeks === 'bigint' ? kopeks : BigInt(Math.round(Number(kopeks)));
+  const neg = k < BigInt(0);
+  const a = neg ? -k : k;
+  const whole = (a / BigInt(100)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '\u00A0');
+  const cents = (a % BigInt(100)).toString().padStart(2, '0');
+  return `${neg ? '−' : ''}${whole},${cents}`;
 }
 
 export async function handleSyncStatus(ctx: BotContext): Promise<void> {
@@ -14,7 +18,6 @@ export async function handleSyncStatus(ctx: BotContext): Promise<void> {
   if (!from) return;
 
   const text = ctx.message?.text ?? '';
-  // Extract run_id from "/sync_status <run_id>"
   const parts = text.trim().split(/\s+/);
   const runId = parts[1] ?? null;
 
@@ -47,9 +50,14 @@ export async function handleSyncStatus(ctx: BotContext): Promise<void> {
       const matchedCount = run.matched_count ?? 0;
       const unmatchedCount = run.unmatched_count ?? 0;
       const ambiguousCount = run.ambiguous_count ?? 0;
-      const lossRub = formatAmount(run.unmatched_amount);
+      const lossKopeks = run.loss_kopeks ?? BigInt(0);
+      const lossRub = formatAmount(lossKopeks);
+      const lossPercent =
+        lossKopeks > BigInt(0) && run.loss_percent != null
+          ? Number(run.loss_percent).toFixed(1)
+          : null;
       await ctx.reply(
-        msg.syncCompleted(matchedCount, unmatchedCount, ambiguousCount, lossRub),
+        msg.syncCompleted(matchedCount, unmatchedCount, ambiguousCount, lossRub, lossPercent),
       );
       if (run.ambiguous_amount && BigInt(run.ambiguous_amount) > BigInt(0)) {
         const ambiguousRub = formatAmount(run.ambiguous_amount);
