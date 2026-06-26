@@ -28,7 +28,7 @@ export async function handleHistory(ctx: BotContext): Promise<void> {
   }
 
   const lines = completed.map((r, i) =>
-    msg.historyEntry(i + 1, fmtDate(r.created_at), r.unmatched_amount ?? BigInt(0)),
+    msg.historyEntry(i + 1, fmtDate(r.created_at), r.loss_kopeks ?? BigInt(0)),
   );
 
   await ctx.reply(`${msg.historyHeader}\n\n${lines.join('\n')}`);
