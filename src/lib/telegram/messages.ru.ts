@@ -85,12 +85,12 @@ export const msg = {
     `📉 Оценка возможных недоплат: ~${monthly} ₽ в месяц, ~${yearly} ₽ в год. Это статистическая оценка на основе 4% от оборота. Точная сумма будет после сверки.`,
 
   // ── Subscription ──────────────────────────────────────────────────────────────
-  subscribeTrialStatus: (expiryDate: string, paymentUrl: string) =>
-    `Ваш статус: Пробный период (активен до ${expiryDate}). Подписка на 30 дней стоит 1 500 ₽. Оплатить: ${paymentUrl}`,
+    subscribeTrialStatus: (expiryDate: string, paymentUrl: string) =>
+    `Ваш статус: Пробный период (активен до ${expiryDate}).\n\nСтоимость подписки: 1 500 ₽ за 30 дней.\nОплатить: ${paymentUrl}`,
   subscribeActiveStatus: (expiryDate: string, paymentUrl: string) =>
-    `Ваш статус: Активна (до ${expiryDate}). Продлить подписку: ${paymentUrl}`,
+    `Ваш статус: Активна (до ${expiryDate}).\n\nСтоимость продления: 1 500 ₽ за 30 дней.\nПродлить подписку: ${paymentUrl}`,
   subscribeExpiredStatus: (paymentUrl: string) =>
-    `Ваш доступ закончился. Чтобы продолжить, оформите подписку: ${paymentUrl}`,
+    `Ваш доступ закончился.\n\nСтоимость подписки: 1 500 ₽ за 30 дней.\nЧтобы продолжить, оформите подписку: ${paymentUrl}`,
   subscribeSuccess: (expiryDate: string) =>
     `Оплата прошла успешно! Ваша подписка активна до ${expiryDate}. Спасибо!`,
   subscribeReminderExpiry: 'Ваша подписка закончится через 3 дня. Продлите, чтобы не потерять доступ: /subscribe',
