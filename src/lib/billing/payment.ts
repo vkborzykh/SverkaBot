@@ -10,7 +10,7 @@ const CURRENCY = 'RUB';
 
 export async function createOrReusePayment(userId: string): Promise<string> {
   const pending = await findPendingTransactionByUserId(userId);
-  if (pending?.confirmation_url) return pending.confirmation_url; // reuse existing link
+  if (pending?.confirmation_url) return pending.confirmation_url;
 
   const provider = getPaymentProvider();
   const { paymentUrl, providerTxId } = await provider.createPayment(
