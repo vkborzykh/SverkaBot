@@ -1,64 +1,72 @@
 import { NextRequest } from 'next/server';
 import { okResponse, errResponse } from '@/src/lib/http';
+import { YooKassaProvider } from '@/src/lib/billing/provider';
 import {
   findBillingTransactionByProviderTxId,
   updateBillingTransaction,
 } from '@/src/db/repositories/billing-transactions';
-import { findUserById } from '@/src/db/repositories/users';
 import { activateSubscription } from '@/src/lib/billing/subscription';
-import { getPaymentProvider } from '@/src/lib/billing/provider';
+import { findUserById } from '@/src/db/repositories/users';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 const SUBSCRIPTION_DAYS = 30;
 
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const signature = req.headers.get('x-payment-signature') ?? '';
-
-  const provider = getPaymentProvider();
-  if (!provider.verifyWebhook(body, signature)) {
-    return errResponse('INVALID_SIGNATURE', 'Webhook signature invalid', 403);
+  let body: { event?: string; object?: { id?: string } };
+  try {
+    body = await req.json();
+  } catch {
+    return errResponse('INVALID_REQUEST', 'bad json', 400);
   }
 
-  const providerTxId = body.provider_tx_id as string | undefined;
-  if (!providerTxId) {
-    return errResponse('MISSING_TX_ID', 'provider_tx_id is required', 400);
+  const paymentId = body?.object?.id;
+  if (!paymentId) return okResponse({ ok: true }); // ack unknown shape
+
+  // Подтверждение подлинности: перезапрос статуса платежа напрямую у YooKassa
+  const provider = new YooKassaProvider();
+  let payment: { status: string };
+  try {
+    payment = await provider.getPayment(paymentId);
+  } catch {
+    return errResponse('DEPENDENCY_ERROR', 'verification failed', 502);
   }
 
-  const tx = await findBillingTransactionByProviderTxId(providerTxId);
-  if (!tx) {
-    return errResponse('TX_NOT_FOUND', 'Transaction not found', 404);
+  if (payment.status !== 'succeeded') {
+    if (payment.status === 'canceled') {
+      const tx = await findBillingTransactionByProviderTxId(paymentId);
+      if (tx && tx.status === 'PENDING')
+        await updateBillingTransaction(tx.id, { status: 'FAILED' });
+    }
+    return okResponse({ ok: true });
   }
 
-  // Idempotency: already processed
-  if (tx.status === 'SUCCESS') {
-    return okResponse({ already_processed: true });
-  }
+  const tx = await findBillingTransactionByProviderTxId(paymentId);
+  if (!tx) return okResponse({ ok: true });            // неизвестная транзакция – ack
+  if (tx.status === 'SUCCESS') return okResponse({ ok: true }); // идемпотентность
 
-  // Update transaction status
   await updateBillingTransaction(tx.id, { status: 'SUCCESS' });
-
-  // Activate subscription
   const endDate = await activateSubscription(tx.user_id, SUBSCRIPTION_DAYS);
 
-  // Send Telegram notification
   const user = await findUserById(tx.user_id);
-  if (user?.telegram_id) {
-    const token = process.env.TELEGRAM_BOT_TOKEN;
-    if (token) {
-      const formatted = endDate.toLocaleDateString('ru-RU', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        timeZone: 'UTC',
-      });
-      const text = `Оплата прошла успешно! Ваша подписка активна до ${formatted}. Спасибо!`;
-      fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: String(user.telegram_id), text }),
-      }).catch(() => {});
-    }
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (user?.telegram_id && token) {
+    const formatted = endDate.toLocaleDateString('ru-RU', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
+    fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: String(user.telegram_id),
+        text: `Оплата прошла успешно! Ваша подписка активна до ${formatted}. Спасибо!`,
+      }),
+    }).catch(() => {});
   }
 
-  return okResponse({ success: true, subscription_end_date: endDate.toISOString() });
+  return okResponse({ ok: true });
 }
