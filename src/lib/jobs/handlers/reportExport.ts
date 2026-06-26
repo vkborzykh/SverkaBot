@@ -8,28 +8,16 @@ import { findParsingErrorsByImportId } from '@/src/db/repositories/parsing-error
 import { findUserById } from '@/src/db/repositories/users';
 import { findPrimaryReportByRunId, createReport } from '@/src/db/repositories/reports';
 import { storeReport } from '@/src/lib/ingestion/storage';
-import {
-  buildSummaryCSV,
-  buildMatchedCSV,
-  buildUnmatchedCSV,
-  buildAmbiguousCSV,
-  buildAllTransactionsCSV,
-  buildEvidenceCSV,
-  buildParsingErrorsCSV,
-  buildMetricsCSV,
-  type MatchedRow,
-} from '@/src/lib/reports/csvBuilders';
 import { buildHtmlReport, type ClaimRow } from '@/src/lib/reports/htmlReport';
-import { buildClaimCSV } from '@/src/lib/reports/claimBuilder';
 
-function computeLossEstimate(run: {
-  unmatched_amount?: bigint | null;
-  ambiguous_amount?: bigint | null;
-}): bigint {
-  const unmatched = run.unmatched_amount ?? BigInt(0);
-  const ambiguous = run.ambiguous_amount ?? BigInt(0);
-  return unmatched + ambiguous / BigInt(2);
-}
+// Локальный тип, ранее приходил из csvBuilders
+type MatchedRow = {
+  match_id: string;
+  match_type: string;
+  final_score: number | string | null;
+  wb_tx: CanonicalTransaction | undefined;
+  bank_tx: CanonicalTransaction | undefined;
+};
 
 export async function handleReportExport(job: Job): Promise<void> {
   const runId = (job.payload as Record<string, string>)?.run_id ?? job.entity_id;
@@ -107,7 +95,6 @@ export async function handleReportExport(job: Job): Promise<void> {
   }
 
   const unmatchedWbTxs = wbTxs.filter((tx) => !matchedWbTxIds.has(tx.id));
-  const lossEstimate = computeLossEstimate(run);
 
   let expectedKopeks = BigInt(0);
   let receivedKopeks = BigInt(0);
@@ -151,10 +138,8 @@ export async function handleReportExport(job: Job): Promise<void> {
   });
 
   const htmlBuffer = Buffer.from(htmlReport, 'utf-8');
-  // Сохраняем HTML с правильным расширением
   const storagePath = await storeReport(runId, htmlBuffer, 'text/html');
 
-  // Создаём запись в БД
   await createReport({
     run_id: runId,
     storage_path: storagePath,
