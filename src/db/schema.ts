@@ -276,6 +276,9 @@ export const reconciliation_runs = pgTable(
     match_rate: decimal('match_rate', { precision: 5, scale: 2 }),
     unmatched_amount: bigint('unmatched_amount', { mode: 'bigint' }),
     ambiguous_amount: bigint('ambiguous_amount', { mode: 'bigint' }),
+    turnover_kopeks: bigint('turnover_kopeks', { mode: 'bigint' }),
+    loss_kopeks: bigint('loss_kopeks', { mode: 'bigint' }),
+    loss_percent: decimal('loss_percent', { precision: 8, scale: 4 }),
     started_at: timestamp('started_at', { withTimezone: true }),
     completed_at: timestamp('completed_at', { withTimezone: true }),
     created_at: timestamp('created_at', { withTimezone: true })
