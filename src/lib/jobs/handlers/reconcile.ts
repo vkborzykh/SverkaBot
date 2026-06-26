@@ -55,7 +55,8 @@ function buildUserMessage(r: WbPayoutResult): string {
       return `⚠️ Сверка завершена. Ожидалось: ${e}. Поступило: ${got}. Возможная недоплата: ${rub(r.discrepancyKopeks)}.`;
     case 'missing':
     default:
-      return `⚠️ Сверка завершена. Ожидалось к выплате: ${e}, но поступлений от Wildberries не найдено. Возможная потеря: ${rub(r.unmatchedAmountKopeks)}.`;
+      // заменено «Возможная потеря» на «Сумма неподтверждённых выплат»
+      return `⚠️ Сверка завершена. Ожидалось к выплате: ${e}, но поступлений от Wildberries не найдено. Сумма неподтверждённых выплат: ${rub(r.unmatchedAmountKopeks)}.`;
   }
 }
 
@@ -92,6 +93,16 @@ export async function handleReconcile(job: Job): Promise<void> {
     const result = await reconcileWbPayout(run);
     console.log(`[handleReconcile] Reconcile result status: ${result.status}`);
 
+    // Канонические метрики (единый источник истины).
+    // turnover = ожидаемый нетто-выплаты, loss = неподтверждённая сумма.
+    const turnoverKopeks = result.expectedNetKopeks;
+    const diff = result.expectedNetKopeks - result.receivedKopeks;
+    const lossKopeks = diff > BigInt(0) ? diff : BigInt(0);
+    const lossPercent =
+      lossKopeks > BigInt(0) && turnoverKopeks > BigInt(0)
+        ? ((Number(lossKopeks) / Number(turnoverKopeks)) * 100).toFixed(4)
+        : null;
+
     console.log(`[handleReconcile] Updating run to COMPLETED...`);
     await updateRun(runId, {
       status: 'COMPLETED',
@@ -104,12 +115,15 @@ export async function handleReconcile(job: Job): Promise<void> {
       match_rate: result.matchRate.toFixed(2),
       unmatched_amount: result.unmatchedAmountKopeks,
       ambiguous_amount: result.ambiguousAmountKopeks,
+      turnover_kopeks: turnoverKopeks,
+      loss_kopeks: lossKopeks,
+      loss_percent: lossPercent,
     });
 
     console.log(`[handleReconcile] Enqueueing report export...`);
     await enqueue('report_export', runId, { run_id: runId });
 
-    // ── ОДНО ОБЪЕДИНЁННОЕ УВЕДОМЛЕНИЕ ──
+    // ── УВЕДОМЛЕНИЕ ──
     if (user?.telegram_id) {
       console.log(`[handleReconcile] Notifying user ${user.telegram_id}`);
       let message = buildUserMessage(result);
