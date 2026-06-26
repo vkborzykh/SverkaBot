@@ -1,6 +1,6 @@
 // Self-contained HTML one-pager for a reconciliation run: expected vs received,
-// potential loss, and the claim table. Pure string output (inline CSS + SVG, no
-// external resources) so it works in the ZIP, in a browser, or behind a link —
+// unconfirmed payouts, and the claim table. Pure string output (inline CSS + SVG,
+// no external resources) so it works in the ZIP, in a browser, or behind a link —
 // without any server-side rendering pipeline.
 
 export interface ClaimRow {
@@ -126,7 +126,7 @@ export function buildHtmlReport(data: HtmlReportData): string {
     <div class="figs">
       <div class="fig"><div class="k">Ожидалось к выплате</div><div class="v">${rub(data.expectedKopeks)}</div></div>
       <div class="fig"><div class="k">Поступило</div><div class="v">${rub(data.receivedKopeks)}</div></div>
-      <div class="fig loss"><div class="k">Возможные потери</div><div class="v">${rub(
+      <div class="fig loss"><div class="k">Неподтверждённые выплаты</div><div class="v">${rub(
         data.lossKopeks > BigInt(0) ? data.lossKopeks : BigInt(0),
       )}</div></div>
     </div>
