@@ -1,3 +1,4 @@
+import { alertWorkerFailure } from '@/src/lib/admin/alerts';
 import { sql, inArray } from 'drizzle-orm';
 import { getDb } from '@/src/db/index';
 import { updateJob, type Job } from '@/src/db/repositories/jobs';
