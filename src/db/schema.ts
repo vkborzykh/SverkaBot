@@ -92,6 +92,21 @@ export const trial_usage = pgTable('trial_usage', {
   used_at: timestamp('used_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+// ── admin_notifications (worker alerts) ──────────────────────────────────────
+
+export const admin_notifications = pgTable(
+  'admin_notifications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    severity: text('severity').notNull(),
+    title: text('title').notNull(),
+    message: text('message').notNull(),
+    resolved: boolean('resolved').notNull().default(false),
+    created_at: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('admin_notifications_resolved_idx').on(t.resolved)],
+);
+
 // ── statement_profiles ────────────────────────────────────────────────────────
 
 export const statement_profiles = pgTable(
