@@ -145,7 +145,7 @@ export async function handleParseBank(job: Job): Promise<void> {
 
   const imp = await findImportById(importId);
   if (!imp) throw new Error(`Import not found: ${importId}`);
-  if (imp.status === 'COMPLETED' || imp.status === 'FAILED') return;
+  if (imp.status === 'COMPLETED' || imp.status === 'FAILED' || imp.status === 'CANCELLED') return;
 
   const user = await findUserById(imp.user_id);
   console.log(`[parseBank] User found: ${user?.id}, telegram_id: ${user?.telegram_id}`);
