@@ -1,10 +1,10 @@
-import { alertWorkerFailure } from '@/src/lib/admin/alerts';
 import { sql, inArray } from 'drizzle-orm';
 import { getDb } from '@/src/db/index';
 import { updateJob, type Job } from '@/src/db/repositories/jobs';
 import { jobs } from '@/src/db/schema';
 import { dispatch } from './dispatch';
 import { notifyFailure } from './notify';
+import { alertWorkerFailure } from '@/src/lib/admin/alerts';
 
 const BATCH_SIZE = 3;
 const MAX_RETRIES = 3;
@@ -64,6 +64,7 @@ async function processBatch(claimed: Job[]): Promise<void> {
             completed_at: new Date(),
           });
           await notifyFailure(job);
+          await alertWorkerFailure(job, message);   // ← Админ-алерт при финальной ошибке
         } else {
           const nextAttemptAt = new Date(Date.now() + backoffMs(currentRetries));
           const existingPayload = (job.payload as JobPayload | null) ?? {};
