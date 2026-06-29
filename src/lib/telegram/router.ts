@@ -3,7 +3,6 @@ import { findUserByTelegramId } from '@/src/db/repositories/users';
 import { checkAccess, PROTECTED_COMMANDS } from './access';
 import { getSession, clearSession } from './session';
 import { handleStart, handleConsentAccept, handleConsentDecline } from './handlers/start';
-import { handleLossCalculator, handleTurnoverInput } from './handlers/loss-calculator';
 import {
   handleUploadWbCommand,
   handleUploadBankCommand,
@@ -21,6 +20,8 @@ import { handleDeleteMyData, handleDeleteConfirm, handleDeleteCancel } from './h
 import { handleSubscribe } from './handlers/subscribe';
 import { handleRunSync } from './handlers/runSync';
 import { handleSyncStatus } from './handlers/syncStatus';
+import { handleRetryImport } from './handlers/retryImport';
+import { handleCancel } from './handlers/cancelOp';
 import {
   isAdmin,
   handleViewProfiles,
@@ -32,7 +33,6 @@ import {
 } from './handlers/admin';
 import { msg } from './messages.ru';
 
-// Minimal context shape for our handlers — avoids importing full Telegraf in the route
 export interface BotContext {
   from: TgUser | undefined;
   reply(text: string, extra?: unknown): Promise<unknown>;
@@ -61,7 +61,6 @@ export async function routeUpdate(
     const telegramId = BigInt(from.id);
     const sessionState = await getSession(telegramId);
 
-    // Handle document uploads based on awaiting state
     if ('document' in message && message.document) {
       const doc = message.document as {
         file_id: string;
@@ -82,8 +81,6 @@ export async function routeUpdate(
         await handleBankFileReceived(ctx, docInfo);
         return;
       }
-      // Document received without an active upload session. With DB-backed
-      // sessions (Phase 1) this is rare, but never go silent — guide the user.
       await ctx.reply(msg.uploadNoSession);
       return;
     }
@@ -92,13 +89,8 @@ export async function routeUpdate(
 
     const text = message.text.trim();
 
-    // Check in-session text input first
-    if (sessionState === 'awaiting_turnover') {
-      await handleTurnoverInput(ctx as Parameters<typeof handleTurnoverInput>[0]);
-      return;
-    }
+    // sessionState теперь только 'awaiting_wb_file' и 'awaiting_bank_file'
 
-    // Map menu button labels to commands
     const commandMap: Record<string, string> = {
       [msg.menuUploadWb]: 'upload_wb',
       [msg.menuUploadBank]: 'upload_bank',
@@ -122,7 +114,6 @@ export async function routeUpdate(
       return;
     }
 
-    // Admin commands — only for users in TELEGRAM_ADMIN_IDS
     const ADMIN_COMMANDS = new Set([
       'view_profiles',
       'activate_profile',
@@ -160,7 +151,6 @@ export async function routeUpdate(
       return;
     }
 
-    // Access check for non-start commands
     const user = await findUserByTelegramId(telegramId);
     if (!user) {
       await handleStart(ctx as Parameters<typeof handleStart>[0]);
@@ -204,8 +194,11 @@ export async function routeUpdate(
       case 'delete_my_data':
         await handleDeleteMyData(ctx as Parameters<typeof handleDeleteMyData>[0]);
         break;
-      case 'loss_calculator':
-        await handleLossCalculator(ctx as Parameters<typeof handleLossCalculator>[0]);
+      case 'retry_import':
+        await handleRetryImport(ctx as Parameters<typeof handleRetryImport>[0]);
+        break;
+      case 'cancel':
+        await handleCancel(ctx as Parameters<typeof handleCancel>[0]);
         break;
     }
   }
