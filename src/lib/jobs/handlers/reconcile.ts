@@ -75,7 +75,7 @@ export async function handleReconcile(job: Job): Promise<void> {
   }
   console.log(`[handleReconcile] Found run with status: ${run.status}`);
 
-  if (run.status === 'COMPLETED' || run.status === 'FAILED') {
+    if (run.status === 'COMPLETED' || run.status === 'FAILED' || run.status === 'CANCELLED') {
     console.log(`[handleReconcile] Run already ${run.status}, skipping.`);
     return;
   }
