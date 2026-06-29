@@ -11,8 +11,7 @@ import { getDb } from '@/src/db/index';
 
 export type SessionState =
   | 'awaiting_wb_file'
-  | 'awaiting_bank_file'
-  | 'awaiting_turnover';
+  | 'awaiting_bank_file';
 
 const TTL_MINUTES = 60;
 
