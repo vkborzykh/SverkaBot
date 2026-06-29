@@ -15,7 +15,8 @@ export const PROTECTED_COMMANDS = new Set([
   'status',
   'sync_status',
   'delete_my_data',
-  'loss_calculator',
+  'retry_import',
+  'cancel',
 ]);
 
 export function checkAccess(user: {
