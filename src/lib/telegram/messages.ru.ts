@@ -79,11 +79,6 @@ export const msg = {
   // ── History ───────────────────────────────────────────────────────────────────
   historyHeader: '📜 Последние сверки:',
 
-  // ── Loss calculator ───────────────────────────────────────────────────────────
-  lossCalcPrompt: 'Какой ваш среднемесячный оборот на Wildberries (₽)? Например: 500 000',
-  lossCalcResult: (monthly: string, yearly: string) =>
-    `📉 Оценка возможных недоплат: ~${monthly} ₽ в месяц, ~${yearly} ₽ в год. Это статистическая оценка на основе 4% от оборота. Точная сумма будет после сверки.`,
-
   // ── Subscription ──────────────────────────────────────────────────────────────
     subscribeTrialStatus: (expiryDate: string, paymentUrl: string) =>
     `Ваш статус: Пробный период (активен до ${expiryDate}).\n\nСтоимость подписки: 1 500 ₽ за 30 дней.\nОплатить: ${paymentUrl}`,
@@ -201,4 +196,17 @@ export const msg = {
   getReportGenerating: 'Готовлю отчёт — он придёт в течение минуты.',
   getReportError: 'Не удалось получить отчёт. Попробуйте позже.',
   getReportCaption: 'Ваш отчёт по сверке.',
+    // ── Retry import ──
+  retryMissingId: 'Укажите ID импорта: /retry_import <id>',
+  retryNotFound: 'Импорт не найден или не принадлежит вашему аккаунту.',
+  retryAlreadyDone: 'Файл уже успешно обработан. Если нужно загрузить новый файл, отправьте его через /upload_wb или /upload_bank.',
+  retryNotAllowed: 'Повторная обработка доступна только для импортов со статусом «ошибка» или «отменён».',
+  retryNoFile: 'Файл импорта недоступен. Загрузите его заново через /upload_wb или /upload_bank.',
+  retryQueued: (id: string) => `Повторная обработка файла запущена. Статус: /status ${id}.`,
+  // ── Cancel ──
+  cancelMissingId: 'Укажите ID: /cancel <id>',
+  cancelNotFound: 'Объект не найден или не принадлежит вашему аккаунту.',
+  cancelNotAllowed: 'Операция уже завершена или отменена. Отмена невозможна.',
+  cancelImportDone: 'Обработка файла отменена. Вы можете начать заново.',
+  cancelRunDone: 'Сверка отменена. Вы можете запустить новую сверку.',
 } as const;
