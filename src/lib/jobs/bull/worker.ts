@@ -1,13 +1,10 @@
-// BullMQ worker — runs on the always-on backend (Oracle VM), NOT on Vercel.
-// Loads the canonical `jobs` row, dispatches to the existing handler, and keeps
-// the row's status in sync. BullMQ owns concurrency / retries / backoff.
-
 import { Worker, type Job as BullJob } from 'bullmq';
 import { getRedisConnection } from './connection';
 import { QUEUE_NAME, type BullJobData } from './queue';
 import { dispatch } from '../dispatch';
 import { notifyFailure } from '../notify';
 import { findJobById, updateJob } from '@/src/db/repositories/jobs';
+import { alertWorkerFailure } from '@/src/lib/admin/alerts';
 
 const CONCURRENCY = Number(process.env.WORKER_CONCURRENCY ?? '3');
 
@@ -71,7 +68,10 @@ export function startWorker(): Worker<BullJobData> {
 
     if (isFinal) {
       const job = await findJobById(dbJobId);
-      if (job) await notifyFailure(job);
+      if (job) {
+        await notifyFailure(job);
+        await alertWorkerFailure(job, err.message);   // ← Админ-алерт при финальной ошибке
+      }
     }
   });
 
