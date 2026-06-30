@@ -11,16 +11,26 @@ export const msg = {
     `Спасибо! Вам открыт бесплатный доступ на 7 дней (до ${expiryDate}). В течение этого времени вы можете выполнять сверки. Теперь загрузите отчёт Wildberries и выписку банка.`,
 
   // ── Main menu ────────────────────────────────────────────────────────────────
+  menuNewReconciliation: '🆕 Начать новую сверку',
   menuUploadWb: '📊 Загрузить WB отчёт',
   menuUploadBank: '🏦 Загрузить выписку',
   menuRunSync: '🔄 Запустить сверку',
   menuHistory: '📜 История',
   menuSubscribe: '💰 Подписка',
   menuHelp: '❓ Помощь',
+  menuResetReconciliation: '🔄 Начать заново',
 
   // ── Access ────────────────────────────────────────────────────────────────────
   accessExpired: 'Ваш доступ завершился. Для продолжения оформите подписку: /subscribe',
   trialAlreadyUsed: 'Вы уже использовали пробный период. Для продолжения оформите подписку: /subscribe',
+
+  // ── New reconciliation flow ────────────────────────────────────────────────
+  newReconciliationPrompt:
+    'Начинаем новую сверку.\n1) Загрузите отчёт WB (📊 Загрузить WB отчёт)\n2) Загрузите выписку банка (🏦 Загрузить выписку)\n\nПосле обработки обоих файлов сверка запустится автоматически.',
+  wbAlreadyUploaded: 'Отчёт WB уже был загружен. Если хотите заменить, нажмите «Начать заново».',
+  bankAlreadyUploaded: 'Банковская выписка уже была загружена. Если хотите заменить, нажмите «Начать заново».',
+  reconciliationReset: 'Операция сброшена. Загрузите новые файлы.',
+  reconciliationCompleted: 'Сверка завершена. Можете начать новую операцию.',
 
   // ── WB upload ────────────────────────────────────────────────────────────────
   uploadWbPrompt: 'Пришлите файл отчёта Wildberries в формате XLSX. Размер не более 20 МБ.',
@@ -79,8 +89,13 @@ export const msg = {
   // ── History ───────────────────────────────────────────────────────────────────
   historyHeader: '📜 Последние сверки:',
 
+  // ── Loss calculator ───────────────────────────────────────────────────────────
+  lossCalcPrompt: 'Какой ваш среднемесячный оборот на Wildberries (₽)? Например: 500 000',
+  lossCalcResult: (monthly: string, yearly: string) =>
+    `📉 Оценка возможных недоплат: ~${monthly} ₽ в месяц, ~${yearly} ₽ в год. Это статистическая оценка на основе 4% от оборота. Точная сумма будет после сверки.`,
+
   // ── Subscription ──────────────────────────────────────────────────────────────
-    subscribeTrialStatus: (expiryDate: string, paymentUrl: string) =>
+  subscribeTrialStatus: (expiryDate: string, paymentUrl: string) =>
     `Ваш статус: Пробный период (активен до ${expiryDate}).\n\nСтоимость подписки: 1 500 ₽ за 30 дней.\nОплатить: ${paymentUrl}`,
   subscribeActiveStatus: (expiryDate: string, paymentUrl: string) =>
     `Ваш статус: Активна (до ${expiryDate}).\n\nСтоимость продления: 1 500 ₽ за 30 дней.\nПродлить подписку: ${paymentUrl}`,
@@ -198,13 +213,15 @@ export const msg = {
   getReportGenerating: 'Готовлю отчёт — он придёт в течение минуты.',
   getReportError: 'Не удалось получить отчёт. Попробуйте позже.',
   getReportCaption: 'Ваш отчёт по сверке.',
-    // ── Retry import ──
+
+  // ── Retry import ──
   retryMissingId: 'Укажите ID импорта: /retry_import <id>',
   retryNotFound: 'Импорт не найден или не принадлежит вашему аккаунту.',
   retryAlreadyDone: 'Файл уже успешно обработан. Если нужно загрузить новый файл, отправьте его через /upload_wb или /upload_bank.',
   retryNotAllowed: 'Повторная обработка доступна только для импортов со статусом «ошибка» или «отменён».',
   retryNoFile: 'Файл импорта недоступен. Загрузите его заново через /upload_wb или /upload_bank.',
   retryQueued: (id: string) => `Повторная обработка файла запущена. Статус: /status ${id}.`,
+
   // ── Cancel ──
   cancelMissingId: 'Укажите ID: /cancel <id>',
   cancelNotFound: 'Объект не найден или не принадлежит вашему аккаунту.',
