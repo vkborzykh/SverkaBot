@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import { loadFile } from '@/src/lib/ingestion/storage';
 import type { Job } from '@/src/db/repositories/jobs';
-import { findImportById, updateImport, findImportsByUserId } from '@/src/db/repositories/imports';
+import { findImportById, updateImport } from '@/src/db/repositories/imports';
 import { findUserById } from '@/src/db/repositories/users';
 import {
   createTransactions,
@@ -15,35 +15,42 @@ import { normalizeDate } from '@/src/lib/parsing/normalize/dates';
 import { normalizeAmount } from '@/src/lib/parsing/normalize/amounts';
 import { normalizeText } from '@/src/lib/parsing/normalize/text';
 import { sha256 } from '@/src/lib/ingestion/hash';
-import { enqueue } from '@/src/lib/jobs/queue';
+import { msg } from '@/src/lib/telegram/messages.ru';
+import { wbCompletedKeyboard } from '@/src/lib/telegram/keyboard';
 
 const PARSER_VERSION = 'wb_v1';
 const ROW_LIMIT = 50_000;
 const INSERT_CHUNK = 2000;
 
 async function notifyUser(telegramId: bigint, text: string): Promise<void> {
-  console.log(`[parseWb] notifyUser called for ${telegramId}, text length: ${text.length}`);
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) {
-    console.error('[parseWb] TELEGRAM_BOT_TOKEN is missing');
-    return;
-  }
+  if (!token) return;
   try {
-    const url = `https://api.telegram.org/bot${token}/sendMessage`;
-    const payload = { chat_id: String(telegramId), text };
-    const res = await fetch(url, {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(30000),
+      body: JSON.stringify({ chat_id: String(telegramId), text }),
     });
-    const responseText = await res.text();
-    console.log(`[parseWb] Telegram response: ${res.status}`);
-    if (!res.ok) {
-      console.error(`[parseWb] Non-ok response: ${res.status} ${responseText}`);
-    }
   } catch (err) {
-    console.error('[parseWb] Error sending message:', err);
+    console.error('[parseWb] notifyUser error:', err);
+  }
+}
+
+async function sendWithKeyboard(telegramId: bigint, text: string, keyboard: any): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: String(telegramId),
+        text,
+        reply_markup: keyboard.reply_markup,
+      }),
+    });
+  } catch (err) {
+    console.error('[parseWb] sendWithKeyboard error:', err);
   }
 }
 
@@ -243,7 +250,7 @@ export async function handleParseWb(job: Job): Promise<void> {
       transactions.push({
         import_id: importId,
         source_type: 'WB',
-        marketplace: 'WB',          // ← Фаза 2
+        marketplace: 'WB',
         row_number: rowNumber,
         transaction_date: txDate,
         amount_kopeks: c.amount,
@@ -273,7 +280,6 @@ export async function handleParseWb(job: Job): Promise<void> {
   const errorCount = errors.length;
   const parseSuccessRate = totalRows > 0 ? ((successRows / totalRows) * 100).toFixed(2) : '0.00';
 
-  // Фаза 2: HIGH_CONFIDENCE → NORMAL
   let qualityStatus: 'NORMAL' | 'LOW_CONFIDENCE' | 'MANUAL_REVIEW' = 'NORMAL';
   if (parseFloat(parseSuccessRate) < 70) qualityStatus = 'MANUAL_REVIEW';
 
@@ -296,47 +302,19 @@ export async function handleParseWb(job: Job): Promise<void> {
     failure_reason: null,
   });
 
-  // ── Уведомление и автозапуск (новая логика сессий) ──
+  // ── Уведомление (без автозапуска) ──
   if (user?.telegram_id) {
     try {
       const sessionPayload = await import('@/src/lib/telegram/session').then(m => m.getSessionPayload(user.telegram_id!));
       const isReconciliationActive = sessionPayload && 'wb_import_id' in (sessionPayload ?? {});
 
-      let message = '';
-      if (qualityStatus === 'MANUAL_REVIEW') {
-        message = `⚠️ Файл обработан, но значительная часть строк не распознана (ошибок: ${errorCount}). Результаты сверки могут быть неполными.`;
+      if (isReconciliationActive) {
+        await sendWithKeyboard(user.telegram_id, msg.uploadWbCompleted, wbCompletedKeyboard);
       } else {
-        message = `✅ Отчёт WB обработан. Загружено строк: ${successRows}, ошибок: ${errorCount}.`;
-      }
-
-      if (isReconciliationActive && sessionPayload?.bank_import_id) {
-        // Оба файла загружены в рамках активной сессии → запускаем сверку
-        message += '\n\nГотово. Теперь можно запустить сверку.';
-        await notifyUser(user.telegram_id!, message);
-
-        const { startReconciliation } = await import('@/src/lib/reconciliation/startRun');
-        const result = await startReconciliation({
-          userId: user.id,
-          wbImportId: importId,
-          bankImportId: sessionPayload.bank_import_id as string,
-        });
-        if (!('error' in result)) {
-          await enqueue('reconcile', result.run_id, { run_id: result.run_id });
-          await notifyUser(user.telegram_id!, `Сверка запущена. Обычно занимает до минуты. Статус: /sync_status ${result.run_id}.`);
-        } else {
-          console.log('[parseWb] Auto-reconciliation failed:', result.error);
-        }
-      } else {
-        // Нет активной сессии или нет второго файла
-        if (!isReconciliationActive) {
-          message += '\n\nТеперь можно загрузить выписку банка.';
-        } else {
-          message += '\n\nОжидаем загрузки банковской выписки.';
-        }
-        await notifyUser(user.telegram_id!, message);
+        await notifyUser(user.telegram_id, msg.uploadWbCompleted);
       }
     } catch (err) {
-      console.error('[parseWb] Notification/auto-reconciliation error:', err);
+      console.error('[parseWb] Notification error:', err);
     }
   }
 
