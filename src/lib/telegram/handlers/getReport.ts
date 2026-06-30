@@ -3,6 +3,7 @@ import { findRunById } from '@/src/db/repositories/reconciliation-runs';
 import { findPrimaryReportByRunId } from '@/src/db/repositories/reports';
 import { loadFile } from '@/src/lib/ingestion/storage';
 import { enqueue } from '@/src/lib/jobs/queue';
+import { clearSession } from '@/src/lib/telegram/session';
 import { msg } from '@/src/lib/telegram/messages.ru';
 import type { BotContext } from '@/src/lib/telegram/router';
 
@@ -15,7 +16,7 @@ async function sendDocumentToUser(
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return false;
   try {
-    const blob = new Blob([fileBuffer], { type: 'application/zip' });
+    const blob = new Blob([fileBuffer], { type: 'text/html' });
     const formData = new globalThis.FormData();
     formData.append('chat_id', String(telegramId));
     formData.append('document', blob, filename);
@@ -72,7 +73,7 @@ export async function handleGetReport(ctx: BotContext): Promise<void> {
     return;
   }
 
-  // ZIP export → re-send the archive as a Telegram document.
+  // HTML export → send the file as a Telegram document.
   if (!user.telegram_id) {
     await ctx.reply(msg.getReportError);
     return;
@@ -82,10 +83,17 @@ export async function handleGetReport(ctx: BotContext): Promise<void> {
     const sent = await sendDocumentToUser(
       user.telegram_id,
       buffer,
-      `report_${runId.slice(0, 8)}.zip`,
+      `report_${runId.slice(0, 8)}.html`,
       msg.getReportCaption,
     );
-    if (!sent) await ctx.reply(msg.getReportError);
+    if (!sent) {
+      await ctx.reply(msg.getReportError);
+    } else {
+      // Завершаем активную сессию сверки после успешной отправки
+      if (user.telegram_id) {
+        await clearSession(user.telegram_id);
+      }
+    }
   } catch (err) {
     console.error('[getReport] failed to load/send report:', err);
     await ctx.reply(msg.getReportError);
