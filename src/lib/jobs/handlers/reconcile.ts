@@ -4,6 +4,8 @@ import { findUserById } from '@/src/db/repositories/users';
 import { findImportById } from '@/src/db/repositories/imports';
 import { reconcileWbPayout, type WbPayoutResult } from '@/src/lib/reconciliation/wbPayout';
 import { enqueue } from '@/src/lib/jobs/queue';
+import { clearSession } from '@/src/lib/telegram/session';
+import { msg } from '@/src/lib/telegram/messages.ru';
 
 async function notifyUser(telegramId: bigint, text: string): Promise<void> {
   console.log(`[notifyUser] Attempting to send to ${telegramId}: ${text.slice(0, 50)}...`);
@@ -55,7 +57,6 @@ function buildUserMessage(r: WbPayoutResult): string {
       return `⚠️ Сверка завершена. Ожидалось: ${e}. Поступило: ${got}. Возможная недоплата: ${rub(r.discrepancyKopeks)}.`;
     case 'missing':
     default:
-      // заменено «Возможная потеря» на «Сумма неподтверждённых выплат»
       return `⚠️ Сверка завершена. Ожидалось к выплате: ${e}, но поступлений от Wildberries не найдено. Сумма неподтверждённых выплат: ${rub(r.unmatchedAmountKopeks)}.`;
   }
 }
@@ -75,7 +76,7 @@ export async function handleReconcile(job: Job): Promise<void> {
   }
   console.log(`[handleReconcile] Found run with status: ${run.status}`);
 
-    if (run.status === 'COMPLETED' || run.status === 'FAILED' || run.status === 'CANCELLED') {
+  if (run.status === 'COMPLETED' || run.status === 'FAILED' || run.status === 'CANCELLED') {
     console.log(`[handleReconcile] Run already ${run.status}, skipping.`);
     return;
   }
@@ -94,7 +95,6 @@ export async function handleReconcile(job: Job): Promise<void> {
     console.log(`[handleReconcile] Reconcile result status: ${result.status}`);
 
     // Канонические метрики (единый источник истины).
-    // turnover = ожидаемый нетто-выплаты, loss = неподтверждённая сумма.
     const turnoverKopeks = result.expectedNetKopeks;
     const diff = result.expectedNetKopeks - result.receivedKopeks;
     const lossKopeks = diff > BigInt(0) ? diff : BigInt(0);
@@ -134,7 +134,12 @@ export async function handleReconcile(job: Job): Promise<void> {
 
       message += '\n\n📄 Готовлю отчёт – он придёт в течение минуты.';
       await notifyUser(user.telegram_id, message);
-      console.log(`[handleReconcile] Notification sent.`);
+
+      // Завершаем активную сессию сверки и сообщаем о завершении операции
+      await clearSession(user.telegram_id);
+      await notifyUser(user.telegram_id, msg.reconciliationCompleted);
+
+      console.log(`[handleReconcile] Notification sent and session cleared.`);
     } else {
       console.warn(`[handleReconcile] No telegram_id for user ${run.user_id}, skipping notifications.`);
     }
