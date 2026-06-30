@@ -23,6 +23,7 @@ export const deleteConfirmKeyboard = {
 export const mainMenuKeyboard = {
   reply_markup: {
     keyboard: [
+      [msg.menuNewReconciliation],
       [msg.menuSubscribe, msg.menuHelp],
       [msg.menuHistory, msg.menuDeleteData],
     ],
