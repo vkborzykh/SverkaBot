@@ -5,6 +5,7 @@ import { loadFile } from '@/src/lib/ingestion/storage';
 import { enqueue } from '@/src/lib/jobs/queue';
 import { clearSession } from '@/src/lib/telegram/session';
 import { msg } from '@/src/lib/telegram/messages.ru';
+import { reconciliationFinishedKeyboard } from '@/src/lib/telegram/keyboard';
 import type { BotContext } from '@/src/lib/telegram/router';
 
 async function sendDocumentToUser(
@@ -28,6 +29,27 @@ async function sendDocumentToUser(
     return res.ok;
   } catch {
     return false;
+  }
+}
+
+async function sendMessageToUser(telegramId: bigint, text: string, keyboard?: any): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  try {
+    const body: any = {
+      chat_id: String(telegramId),
+      text,
+    };
+    if (keyboard) {
+      body.reply_markup = keyboard.reply_markup;
+    }
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    console.error('[getReport] sendMessageToUser error:', err);
   }
 }
 
@@ -56,7 +78,6 @@ export async function handleGetReport(ctx: BotContext): Promise<void> {
 
   const report = await findPrimaryReportByRunId(runId);
 
-  // No report yet: regenerate if the run is finished, otherwise it's not ready.
   if (!report || !report.storage_path) {
     if (run.status === 'COMPLETED') {
       await enqueue('report_export', runId, { run_id: runId });
@@ -67,13 +88,13 @@ export async function handleGetReport(ctx: BotContext): Promise<void> {
     return;
   }
 
-  // Google Sheets export → storage_path is the URL itself.
+  // Google Sheets экспорт
   if (report.export_type === 'GOOGLE_SHEETS') {
     await ctx.reply(msg.reportReady(report.storage_path));
     return;
   }
 
-  // HTML export → send the file as a Telegram document.
+  // HTML экспорт
   if (!user.telegram_id) {
     await ctx.reply(msg.getReportError);
     return;
@@ -84,14 +105,15 @@ export async function handleGetReport(ctx: BotContext): Promise<void> {
       user.telegram_id,
       buffer,
       `report_${runId.slice(0, 8)}.html`,
-      msg.getReportCaption,
+      msg.reportCaption,
     );
     if (!sent) {
       await ctx.reply(msg.getReportError);
     } else {
-      // Завершаем активную сессию сверки после успешной отправки
+      // После успешной отправки очищаем сессию и выводим завершающее сообщение
       if (user.telegram_id) {
         await clearSession(user.telegram_id);
+        await sendMessageToUser(user.telegram_id, msg.reconciliationCompleted, reconciliationFinishedKeyboard);
       }
     }
   } catch (err) {
