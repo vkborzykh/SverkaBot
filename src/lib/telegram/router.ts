@@ -75,11 +75,11 @@ export async function routeUpdate(
         fileSizeBytes: doc.file_size ?? 0,
       };
 
-      if (sessionState === 'awaiting_wb_file') {
+      if (sessionState === 'reconciliation_active' || sessionState === 'awaiting_wb_file') {
         await handleWbFileReceived(ctx, docInfo);
         return;
       }
-      if (sessionState === 'awaiting_bank_file') {
+      if (sessionState === 'reconciliation_active' || sessionState === 'awaiting_bank_file') {
         await handleBankFileReceived(ctx, docInfo);
         return;
       }
@@ -92,6 +92,7 @@ export async function routeUpdate(
     const text = message.text.trim();
 
     const commandMap: Record<string, string> = {
+      [msg.menuNewReconciliation]: 'new_reconciliation',
       [msg.menuSubscribe]: 'subscribe',
       [msg.menuHelp]: 'help',
       [msg.menuHistory]: 'history',
@@ -162,6 +163,9 @@ export async function routeUpdate(
     }
 
     switch (command) {
+      case 'new_reconciliation':
+        await handleNewReconciliation(ctx as Parameters<typeof handleNewReconciliation>[0], user.id);
+        break;
       case 'subscribe':
         await handleSubscribe(ctx as Parameters<typeof handleSubscribe>[0]);
         break;
@@ -189,14 +193,12 @@ export async function routeUpdate(
       case 'cancel':
         await handleCancel(ctx as Parameters<typeof handleCancel>[0]);
         break;
-      // заглушки для старых команд – теперь всё через inline
       case 'upload_wb':
       case 'upload_bank':
       case 'run_sync':
         await ctx.reply('Используйте кнопки в чате для выполнения этой операции.');
         break;
       default:
-        // неизвестные команды просто игнорируем
         break;
     }
   }
