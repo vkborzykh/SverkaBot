@@ -1,6 +1,6 @@
 import type { Job } from '@/src/db/repositories/jobs';
 import { loadFile } from '@/src/lib/ingestion/storage';
-import { findImportById, updateImport, findImportsByUserId } from '@/src/db/repositories/imports';
+import { findImportById, updateImport } from '@/src/db/repositories/imports';
 import { findUserById } from '@/src/db/repositories/users';
 import {
   createTransactions,
@@ -26,35 +26,42 @@ import { normalizeAmount } from '@/src/lib/parsing/normalize/amounts';
 import { normalizeText } from '@/src/lib/parsing/normalize/text';
 import { sha256 } from '@/src/lib/ingestion/hash';
 import { getSetting } from '@/src/lib/settings/settings';
-import { enqueue } from '@/src/lib/jobs/queue';
+import { msg } from '@/src/lib/telegram/messages.ru';
+import { bankCompletedKeyboard } from '@/src/lib/telegram/keyboard';
 
 const PARSER_VERSION = 'bank_v1';
 const ROW_LIMIT = 50_000;
 const INSERT_CHUNK = 2000;
 
 async function notifyUser(telegramId: bigint, text: string): Promise<void> {
-  console.log(`[parseBank] notifyUser called for ${telegramId}, text length: ${text.length}`);
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) {
-    console.error('[parseBank] TELEGRAM_BOT_TOKEN is missing');
-    return;
-  }
+  if (!token) return;
   try {
-    const url = `https://api.telegram.org/bot${token}/sendMessage`;
-    const payload = { chat_id: String(telegramId), text };
-    const res = await fetch(url, {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(30000),
+      body: JSON.stringify({ chat_id: String(telegramId), text }),
     });
-    const responseText = await res.text();
-    console.log(`[parseBank] Telegram response: ${res.status}`);
-    if (!res.ok) {
-      console.error(`[parseBank] Non-ok response: ${res.status} ${responseText}`);
-    }
   } catch (err) {
-    console.error('[parseBank] Error sending message:', err);
+    console.error('[parseBank] notifyUser error:', err);
+  }
+}
+
+async function sendWithKeyboard(telegramId: bigint, text: string, keyboard: any): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: String(telegramId),
+        text,
+        reply_markup: keyboard.reply_markup,
+      }),
+    });
+  } catch (err) {
+    console.error('[parseBank] sendWithKeyboard error:', err);
   }
 }
 
@@ -314,7 +321,7 @@ export async function handleParseBank(job: Job): Promise<void> {
     transactions.push({
       import_id: importId,
       source_type: 'BANK',
-      marketplace: null,        // ← Фаза 2
+      marketplace: null,
       row_number: rowNumber,
       transaction_date: txDate,
       amount_kopeks: amountKopeks,
@@ -345,7 +352,6 @@ export async function handleParseBank(job: Job): Promise<void> {
 
   const lowConfThreshold = (await getSetting<number>('low_confidence_threshold')) ?? 0.6;
   const rate = parseFloat(parseSuccessRate);
-  // Фаза 2: HIGH_CONFIDENCE → NORMAL
   let qualityStatus: 'NORMAL' | 'LOW_CONFIDENCE' | 'MANUAL_REVIEW' = 'NORMAL';
   if (rate < 70) qualityStatus = 'MANUAL_REVIEW';
   else if (profileConfidence < lowConfThreshold || rate < 90) qualityStatus = 'LOW_CONFIDENCE';
@@ -371,51 +377,19 @@ export async function handleParseBank(job: Job): Promise<void> {
 
   updateProfileStats(activeProfileId).catch(() => {});
 
-  // ── Уведомление и автозапуск (новая логика сессий) ──
+  // ── Уведомление (без автозапуска) ──
   if (user?.telegram_id) {
     try {
       const sessionPayload = await import('@/src/lib/telegram/session').then(m => m.getSessionPayload(user.telegram_id!));
       const isReconciliationActive = sessionPayload && 'bank_import_id' in (sessionPayload ?? {});
 
-      let message = '';
-      if (qualityStatus === 'MANUAL_REVIEW') {
-        message = `⚠️ Файл обработан, но значительная часть строк не распознана (ошибок: ${errorCount}). Результаты сверки могут быть неполными.`;
-      } else if (profileStatus === 'MATCHED') {
-        message = `✅ Выписка обработана. Использован профиль банка: «${profileDisplayName}». Распознано строк: ${successRows}, ошибок: ${errorCount}.`;
-        if (qualityStatus === 'LOW_CONFIDENCE') {
-          message += '\n\n⚠️ Выписка была распознана с низкой уверенностью. Результаты сверки могут быть неточны.';
-        }
+      if (isReconciliationActive) {
+        await sendWithKeyboard(user.telegram_id, msg.uploadBankCompleted, bankCompletedKeyboard);
       } else {
-        message = `⚠️ Выписка обработана, но структура банка новая. Создан черновик профиля. Точность распознавания может быть ниже.`;
-      }
-
-      if (isReconciliationActive && sessionPayload?.wb_import_id) {
-        // Оба файла загружены → запускаем сверку
-        message += '\n\nГотово. Теперь можно запустить сверку.';
-        await notifyUser(user.telegram_id!, message);
-
-        const { startReconciliation } = await import('@/src/lib/reconciliation/startRun');
-        const result = await startReconciliation({
-          userId: user.id,
-          wbImportId: sessionPayload.wb_import_id as string,
-          bankImportId: importId,
-        });
-        if (!('error' in result)) {
-          await enqueue('reconcile', result.run_id, { run_id: result.run_id });
-          await notifyUser(user.telegram_id!, `Сверка запущена. Обычно занимает до минуты. Статус: /sync_status ${result.run_id}.`);
-        } else {
-          console.log('[parseBank] Auto-reconciliation failed:', result.error);
-        }
-      } else {
-        if (!isReconciliationActive) {
-          message += '\n\nТеперь можно загрузить отчёт WB.';
-        } else {
-          message += '\n\nОжидаем загрузки отчёта WB.';
-        }
-        await notifyUser(user.telegram_id!, message);
+        await notifyUser(user.telegram_id, msg.uploadBankCompleted);
       }
     } catch (err) {
-      console.error('[parseBank] Notification/auto-reconciliation error:', err);
+      console.error('[parseBank] Notification error:', err);
     }
   }
 
