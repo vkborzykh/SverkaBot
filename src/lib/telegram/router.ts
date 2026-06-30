@@ -75,11 +75,11 @@ export async function routeUpdate(
         fileSizeBytes: doc.file_size ?? 0,
       };
 
-      if (sessionState === 'reconciliation_active' || sessionState === 'awaiting_wb_file') {
+      if (sessionState === 'awaiting_wb_file') {
         await handleWbFileReceived(ctx, docInfo);
         return;
       }
-      if (sessionState === 'reconciliation_active' || sessionState === 'awaiting_bank_file') {
+      if (sessionState === 'awaiting_bank_file') {
         await handleBankFileReceived(ctx, docInfo);
         return;
       }
