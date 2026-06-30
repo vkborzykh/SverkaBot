@@ -50,16 +50,18 @@ async function handleFileUpload(
   if (!user) { await ctx.reply(msg.accessExpired); return; }
   if (checkAccess(user) !== 'full') { await ctx.reply(msg.accessExpired); return; }
 
-  // --- New reconciliation flow check ---
+  // Проверка активной сессии
   const sessionPayload = await getSessionPayload(telegramId);
-  const sessionState = await (await import('@/src/lib/telegram/session')).getSession(telegramId);
+  if (!sessionPayload || !('wb_import_id' in sessionPayload) && !('bank_import_id' in sessionPayload)) {
+    // Не в процессе сверки
+    await ctx.reply(msg.uploadNoSession);
+    return;
+  }
 
-  if (sessionState === 'reconciliation_active') {
-    const slotKey = sourceType === 'WB' ? 'wb_import_id' : 'bank_import_id';
-    if (sessionPayload && sessionPayload[slotKey]) {
-      await ctx.reply(sourceType === 'WB' ? msg.wbAlreadyUploaded : msg.bankAlreadyUploaded);
-      return;
-    }
+  const slotKey = sourceType === 'WB' ? 'wb_import_id' : 'bank_import_id';
+  if (sessionPayload[slotKey]) {
+    await ctx.reply(sourceType === 'WB' ? msg.wbAlreadyUploaded : msg.bankAlreadyUploaded);
+    return;
   }
 
   if (!validateExtension(doc.fileName, allowedExtensions)) { await ctx.reply(msg.errInvalidFormat); return; }
@@ -91,19 +93,18 @@ async function handleFileUpload(
     const jobType = sourceType === 'WB' ? 'parse_wb' : 'parse_bank';
     await enqueue(jobType, newImport.id, { import_id: newImport.id });
 
-    // --- Store import_id in session if reconciliation is active ---
-    if (sessionState === 'reconciliation_active') {
-      const slotKey = sourceType === 'WB' ? 'wb_import_id' : 'bank_import_id';
-      const updatedPayload = { ...(sessionPayload ?? {}), [slotKey]: newImport.id };
-      await updateSessionPayload(telegramId, updatedPayload);
-    }
+    // Обновляем сессию: записываем import_id
+    const updatedPayload = { ...sessionPayload, [slotKey]: newImport.id };
+    await updateSessionPayload(telegramId, updatedPayload);
 
-    await clearSession(telegramId); // clear temporary upload state
+    // Сбрасываем состояние ожидания файла, но сохраняем сессию
+    await setSession(telegramId, 'reconciliation_active', updatedPayload);
 
+    // Отправляем краткое подтверждение
     if (sourceType === 'WB') {
-      await ctx.reply(msg.uploadWbReceived(newImport.id));
+      await ctx.reply(msg.uploadWbReceived);
     } else {
-      await ctx.reply(msg.uploadBankReceived(newImport.id));
+      await ctx.reply(msg.uploadBankReceived);
     }
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
@@ -114,25 +115,12 @@ async function handleFileUpload(
 }
 
 export async function handleUploadWbCommand(ctx: BotContext): Promise<void> {
-  const from = ctx.from;
-  if (!from) return;
-  const telegramId = BigInt(from.id);
-  const user = await findUserByTelegramId(telegramId);
-  if (!user || checkAccess(user) !== 'full') { await ctx.reply(msg.accessExpired); return; }
-
-  await setSession(telegramId, 'awaiting_wb_file');
-  await ctx.reply(msg.uploadWbPrompt);
+  // Команда больше не используется (всё через inline), но оставим заглушку
+  await ctx.reply('Используйте кнопки в чате для загрузки файлов.');
 }
 
 export async function handleUploadBankCommand(ctx: BotContext): Promise<void> {
-  const from = ctx.from;
-  if (!from) return;
-  const telegramId = BigInt(from.id);
-  const user = await findUserByTelegramId(telegramId);
-  if (!user || checkAccess(user) !== 'full') { await ctx.reply(msg.accessExpired); return; }
-
-  await setSession(telegramId, 'awaiting_bank_file');
-  await ctx.reply(msg.uploadBankPrompt);
+  await ctx.reply('Используйте кнопки в чате для загрузки файлов.');
 }
 
 export async function handleWbFileReceived(ctx: BotContext, doc: DocumentInfo): Promise<void> {
