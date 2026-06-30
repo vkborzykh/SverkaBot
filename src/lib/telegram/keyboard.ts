@@ -1,22 +1,34 @@
-import { Markup } from 'telegraf';
 import { msg } from './messages.ru';
 
-export const consentKeyboard = Markup.inlineKeyboard([
-  [
-    Markup.button.callback(msg.consentAccept, 'consent:accept'),
-    Markup.button.callback(msg.consentDecline, 'consent:decline'),
-  ],
-]);
+export const consentKeyboard = {
+  reply_markup: {
+    inline_keyboard: [
+      [{ text: msg.consentAccept, callback_data: 'consent:accept' }],
+      [{ text: msg.consentDecline, callback_data: 'consent:decline' }],
+    ],
+  },
+};
 
-export const mainMenuKeyboard = Markup.keyboard([
-  [msg.menuUploadWb, msg.menuUploadBank],
-  [msg.menuRunSync, msg.menuHistory],
-  [msg.menuSubscribe, msg.menuHelp],
-]).resize();
+export const deleteConfirmKeyboard = {
+  reply_markup: {
+    inline_keyboard: [
+      [
+        { text: msg.deleteConfirm, callback_data: 'delete:confirm' },
+        { text: msg.deleteCancel, callback_data: 'delete:cancel' },
+      ],
+    ],
+  },
+};
 
-export const deleteConfirmKeyboard = Markup.inlineKeyboard([
-  [
-    Markup.button.callback(msg.deleteConfirm, 'delete:confirm'),
-    Markup.button.callback(msg.deleteCancel, 'delete:cancel'),
-  ],
-]);
+export const mainMenuKeyboard = {
+  reply_markup: {
+    keyboard: [
+      [msg.menuNewReconciliation],
+      [msg.menuUploadWb, msg.menuUploadBank],
+      [msg.menuRunSync, msg.menuHistory],
+      [msg.menuSubscribe, msg.menuHelp],
+      [msg.menuResetReconciliation],
+    ],
+    resize_keyboard: true,
+  },
+};
