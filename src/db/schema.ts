@@ -558,6 +558,7 @@ export const telegramSessions = pgTable(
   {
     telegram_id: bigint('telegram_id', { mode: 'bigint' }).primaryKey(),
     state: text('state').notNull(),
+    payload: jsonb('payload').default(sql`'{}'::jsonb`),
     updated_at: timestamp('updated_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
