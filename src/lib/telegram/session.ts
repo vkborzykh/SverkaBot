@@ -1,43 +1,86 @@
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { getDb } from '@/src/db/index';
-
-// Conversation state for the Telegram bot. Previously kept in an in-memory Map,
-// which does NOT survive between serverless invocations on Vercel — the "send
-// me the file" request and the "file arrived" request often hit different
-// instances, so the upload matched no session and was silently ignored.
-//
-// Now persisted in the telegram_sessions table (see migration 008). Functions
-// are async; all callers must await them.
+import { telegramSessions } from '@/src/db/schema';
 
 export type SessionState =
   | 'awaiting_wb_file'
-  | 'awaiting_bank_file';
+  | 'awaiting_bank_file'
+  | 'reconciliation_active';   // новая операция сверки
 
-const TTL_MINUTES = 60;
+const SESSION_TTL_MINUTES = 30;
 
-export async function setSession(telegramId: bigint, state: SessionState): Promise<void> {
-  const db = getDb();
-  await db.execute(sql`
-    INSERT INTO telegram_sessions (telegram_id, state, updated_at, expires_at)
-    VALUES (${telegramId}, ${state}, now(), now() + make_interval(mins => ${TTL_MINUTES}))
-    ON CONFLICT (telegram_id) DO UPDATE
-      SET state = EXCLUDED.state,
-          updated_at = now(),
-          expires_at = EXCLUDED.expires_at
-  `);
+function expiresAt(): Date {
+  return new Date(Date.now() + SESSION_TTL_MINUTES * 60 * 1000);
 }
 
 export async function getSession(telegramId: bigint): Promise<SessionState | null> {
   const db = getDb();
-  const rows = await db.execute(sql`
-    SELECT state FROM telegram_sessions
-    WHERE telegram_id = ${telegramId} AND expires_at > now()
-  `);
-  const row = (rows as unknown as Array<{ state: string }>)[0];
-  return (row?.state as SessionState) ?? null;
+  const rows = await db
+    .select({ state: telegramSessions.state })
+    .from(telegramSessions)
+    .where(
+      eq(telegramSessions.telegram_id, telegramId),
+      sql`${telegramSessions.expires_at} > now()`,
+    )
+    .limit(1);
+  return rows.length > 0 ? (rows[0].state as SessionState) : null;
+}
+
+export async function getSessionPayload(
+  telegramId: bigint,
+): Promise<Record<string, unknown> | null> {
+  const db = getDb();
+  const rows = await db
+    .select({ payload: telegramSessions.payload })
+    .from(telegramSessions)
+    .where(
+      eq(telegramSessions.telegram_id, telegramId),
+      sql`${telegramSessions.expires_at} > now()`,
+    )
+    .limit(1);
+  return rows.length > 0 ? (rows[0].payload as Record<string, unknown>) : null;
+}
+
+export async function setSession(
+  telegramId: bigint,
+  state: SessionState,
+  payload?: Record<string, unknown>,
+): Promise<void> {
+  const db = getDb();
+  await db
+    .insert(telegramSessions)
+    .values({
+      telegram_id: telegramId,
+      state,
+      payload: payload ?? {},
+      updated_at: new Date(),
+      expires_at: expiresAt(),
+    })
+    .onConflictDoUpdate({
+      target: telegramSessions.telegram_id,
+      set: {
+        state,
+        payload: payload ?? {},
+        updated_at: new Date(),
+        expires_at: expiresAt(),
+      },
+    });
+}
+
+export async function updateSessionPayload(
+  telegramId: bigint,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const db = getDb();
+  await db
+    .update(telegramSessions)
+    .set({ payload, updated_at: new Date() })
+    .where(eq(telegramSessions.telegram_id, telegramId));
 }
 
 export async function clearSession(telegramId: bigint): Promise<void> {
   const db = getDb();
-  await db.execute(sql`DELETE FROM telegram_sessions WHERE telegram_id = ${telegramId}`);
+  await db
+    .delete(telegramSessions)
+    .where(eq(telegramSessions.telegram_id, telegramId));
 }
