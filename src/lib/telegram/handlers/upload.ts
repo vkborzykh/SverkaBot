@@ -6,7 +6,7 @@ import { findUserByTelegramId } from '@/src/db/repositories/users';
 import { enqueue } from '@/src/lib/jobs/queue';
 import { checkAccess } from '@/src/lib/telegram/access';
 import { msg } from '@/src/lib/telegram/messages.ru';
-import { setSession, getSessionPayload, updateSessionPayload, clearSession } from '@/src/lib/telegram/session';
+import { setSession, getSession, getSessionPayload, updateSessionPayload, clearSession } from '@/src/lib/telegram/session';
 import { isAdmin } from '@/src/lib/telegram/handlers/admin';
 import type { BotContext } from '@/src/lib/telegram/router';
 
@@ -50,13 +50,14 @@ async function handleFileUpload(
   if (!user) { await ctx.reply(msg.accessExpired); return; }
   if (checkAccess(user) !== 'full') { await ctx.reply(msg.accessExpired); return; }
 
-  // Проверка активной сессии
-  const sessionPayload = await getSessionPayload(telegramId);
-  if (!sessionPayload || !('wb_import_id' in sessionPayload) && !('bank_import_id' in sessionPayload)) {
-    // Не в процессе сверки
+  // Проверяем, что пользователь находится в активной сессии сверки
+  const sessionState = await getSession(telegramId);
+  if (sessionState !== 'reconciliation_active') {
     await ctx.reply(msg.uploadNoSession);
     return;
   }
+
+  const sessionPayload = await getSessionPayload(telegramId) ?? {};
 
   const slotKey = sourceType === 'WB' ? 'wb_import_id' : 'bank_import_id';
   if (sessionPayload[slotKey]) {
@@ -93,11 +94,8 @@ async function handleFileUpload(
     const jobType = sourceType === 'WB' ? 'parse_wb' : 'parse_bank';
     await enqueue(jobType, newImport.id, { import_id: newImport.id });
 
-    // Обновляем сессию: записываем import_id
+    // Обновляем сессию: записываем import_id, состояние остаётся reconciliation_active
     const updatedPayload = { ...sessionPayload, [slotKey]: newImport.id };
-    await updateSessionPayload(telegramId, updatedPayload);
-
-    // Сбрасываем состояние ожидания файла, но сохраняем сессию
     await setSession(telegramId, 'reconciliation_active', updatedPayload);
 
     // Отправляем краткое подтверждение
@@ -112,15 +110,6 @@ async function handleFileUpload(
     const showDetail = isAdmin(telegramId) || process.env.DEBUG_UPLOAD_ERRORS === 'true';
     await ctx.reply(showDetail ? `${msg.uploadError}\n\n🔧 ${detail}` : msg.uploadError);
   }
-}
-
-export async function handleUploadWbCommand(ctx: BotContext): Promise<void> {
-  // Команда больше не используется (всё через inline), но оставим заглушку
-  await ctx.reply('Используйте кнопки в чате для загрузки файлов.');
-}
-
-export async function handleUploadBankCommand(ctx: BotContext): Promise<void> {
-  await ctx.reply('Используйте кнопки в чате для загрузки файлов.');
 }
 
 export async function handleWbFileReceived(ctx: BotContext, doc: DocumentInfo): Promise<void> {
