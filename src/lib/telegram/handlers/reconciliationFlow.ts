@@ -7,52 +7,47 @@ import { enqueue } from '@/src/lib/jobs/queue';
 import { startReconciliation } from '@/src/lib/reconciliation/startRun';
 
 export async function handleNewReconciliation(ctx: Context, userId: string): Promise<void> {
+  // Новая операция: очищаем сессию и устанавливаем активное состояние с пустыми слотами
   await setSession(BigInt(ctx.from!.id), 'reconciliation_active', {});
   await ctx.reply(msg.newReconciliationPrompt, uploadWbInlineKeyboard);
 }
 
-// Обработчик inline-кнопки "📊 Загрузить WB отчёт"
 export async function handleUploadWbInline(ctx: Context): Promise<void> {
   await ctx.answerCbQuery();
-  const from = ctx.from!;
-  const telegramId = BigInt(from.id);
-  // Не меняем состояние сессии, только отправляем prompt
+  const telegramId = BigInt(ctx.from!.id);
+  const payload = await getSessionPayload(telegramId) ?? {};
+  // Устанавливаем сессию ожидания WB-файла, сохраняя текущие слоты
+  await setSession(telegramId, 'awaiting_wb_file', payload);
   await ctx.reply(msg.uploadWbPrompt);
 }
 
-// Обработчик замены WB
 export async function handleReplaceWb(ctx: Context): Promise<void> {
   await ctx.answerCbQuery();
   const telegramId = BigInt(ctx.from!.id);
-  const payload = await getSessionPayload(telegramId);
-  if (payload?.wb_import_id) {
-    // Удаляем старый импорт из слота
-    await updateSessionPayload(telegramId, { ...payload, wb_import_id: undefined });
-  }
+  const payload = await getSessionPayload(telegramId) ?? {};
+  delete payload.wb_import_id;
+  await setSession(telegramId, 'awaiting_wb_file', payload);
   await ctx.reply(msg.uploadWbPrompt);
 }
 
-// Обработчик inline-кнопки "🏦 Загрузить выписку"
 export async function handleUploadBankInline(ctx: Context): Promise<void> {
   await ctx.answerCbQuery();
-  const from = ctx.from!;
-  const telegramId = BigInt(from.id);
-  // Не меняем состояние сессии, только отправляем prompt
+  const telegramId = BigInt(ctx.from!.id);
+  const payload = await getSessionPayload(telegramId) ?? {};
+  // Устанавливаем сессию ожидания банковского файла
+  await setSession(telegramId, 'awaiting_bank_file', payload);
   await ctx.reply(msg.uploadBankPrompt);
 }
 
-// Замена выписки
 export async function handleReplaceBank(ctx: Context): Promise<void> {
   await ctx.answerCbQuery();
   const telegramId = BigInt(ctx.from!.id);
-  const payload = await getSessionPayload(telegramId);
-  if (payload?.bank_import_id) {
-    await updateSessionPayload(telegramId, { ...payload, bank_import_id: undefined });
-  }
+  const payload = await getSessionPayload(telegramId) ?? {};
+  delete payload.bank_import_id;
+  await setSession(telegramId, 'awaiting_bank_file', payload);
   await ctx.reply(msg.uploadBankPrompt);
 }
 
-// Запуск сверки по inline-кнопке
 export async function handleRunSyncInline(ctx: Context): Promise<void> {
   await ctx.answerCbQuery();
   const telegramId = BigInt(ctx.from!.id);
@@ -62,9 +57,9 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
     return;
   }
 
-  const payload = await getSessionPayload(telegramId);
-  const wbImportId = payload?.wb_import_id as string | undefined;
-  const bankImportId = payload?.bank_import_id as string | undefined;
+  const payload = await getSessionPayload(telegramId) ?? {};
+  const wbImportId = payload.wb_import_id as string | undefined;
+  const bankImportId = payload.bank_import_id as string | undefined;
 
   if (!wbImportId || !bankImportId) {
     await ctx.reply(msg.syncNeedBothFiles);
