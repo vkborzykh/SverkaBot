@@ -4,8 +4,6 @@ import { checkAccess, PROTECTED_COMMANDS } from './access';
 import { getSession, clearSession } from './session';
 import { handleStart, handleConsentAccept, handleConsentDecline } from './handlers/start';
 import {
-  handleUploadWbCommand,
-  handleUploadBankCommand,
   handleWbFileReceived,
   handleBankFileReceived,
   type DocumentInfo,
@@ -13,13 +11,9 @@ import {
 import { handleHistory } from './handlers/history';
 import { handleStatus } from './handlers/status';
 import { handleGetReport } from './handlers/getReport';
-import {
-  handleHelp,
-} from './handlers/stubs';
+import { handleHelp } from './handlers/stubs';
 import { handleDeleteMyData, handleDeleteConfirm, handleDeleteCancel } from './handlers/deleteData';
 import { handleSubscribe } from './handlers/subscribe';
-import { handleRunSync } from './handlers/runSync';
-import { handleSyncStatus } from './handlers/syncStatus';
 import { handleRetryImport } from './handlers/retryImport';
 import { handleCancel } from './handlers/cancelOp';
 import {
@@ -31,7 +25,14 @@ import {
   handleStats,
   handleRetryExport,
 } from './handlers/admin';
-import { handleNewReconciliation, handleResetReconciliation } from './handlers/reconciliationFlow';
+import {
+  handleNewReconciliation,
+  handleUploadWbInline,
+  handleReplaceWb,
+  handleUploadBankInline,
+  handleReplaceBank,
+  handleRunSyncInline,
+} from './handlers/reconciliationFlow';
 import { msg } from './messages.ru';
 
 export interface BotContext {
@@ -91,14 +92,10 @@ export async function routeUpdate(
     const text = message.text.trim();
 
     const commandMap: Record<string, string> = {
-      [msg.menuUploadWb]: 'upload_wb',
-      [msg.menuUploadBank]: 'upload_bank',
-      [msg.menuRunSync]: 'run_sync',
-      [msg.menuHistory]: 'history',
       [msg.menuSubscribe]: 'subscribe',
       [msg.menuHelp]: 'help',
-      [msg.menuNewReconciliation]: 'new_reconciliation',
-      [msg.menuResetReconciliation]: 'reset_reconciliation',
+      [msg.menuHistory]: 'history',
+      [msg.menuDeleteData]: 'delete_my_data',
     };
 
     let command = '';
@@ -165,29 +162,17 @@ export async function routeUpdate(
     }
 
     switch (command) {
-      case 'new_reconciliation':
-        await handleNewReconciliation(ctx as Parameters<typeof handleNewReconciliation>[0], user.id);
-        break;
-      case 'reset_reconciliation':
-        await handleResetReconciliation(ctx as Parameters<typeof handleResetReconciliation>[0], telegramId);
-        break;
-      case 'upload_wb':
-        await handleUploadWbCommand(ctx);
-        break;
-      case 'upload_bank':
-        await handleUploadBankCommand(ctx);
-        break;
-      case 'run_sync':
-        await handleRunSync(ctx as Parameters<typeof handleRunSync>[0]);
-        break;
-      case 'history':
-        await handleHistory(ctx as Parameters<typeof handleHistory>[0]);
-        break;
       case 'subscribe':
         await handleSubscribe(ctx as Parameters<typeof handleSubscribe>[0]);
         break;
       case 'help':
         await handleHelp(ctx as Parameters<typeof handleHelp>[0]);
+        break;
+      case 'history':
+        await handleHistory(ctx as Parameters<typeof handleHistory>[0]);
+        break;
+      case 'delete_my_data':
+        await handleDeleteMyData(ctx as Parameters<typeof handleDeleteMyData>[0]);
         break;
       case 'get_report':
         await handleGetReport(ctx as Parameters<typeof handleGetReport>[0]);
@@ -196,16 +181,22 @@ export async function routeUpdate(
         await handleStatus(ctx as Parameters<typeof handleStatus>[0]);
         break;
       case 'sync_status':
-        await handleSyncStatus(ctx as Parameters<typeof handleSyncStatus>[0]);
-        break;
-      case 'delete_my_data':
-        await handleDeleteMyData(ctx as Parameters<typeof handleDeleteMyData>[0]);
+        await import('./handlers/syncStatus').then(m => m.handleSyncStatus(ctx as any));
         break;
       case 'retry_import':
         await handleRetryImport(ctx as Parameters<typeof handleRetryImport>[0]);
         break;
       case 'cancel':
         await handleCancel(ctx as Parameters<typeof handleCancel>[0]);
+        break;
+      // заглушки для старых команд – теперь всё через inline
+      case 'upload_wb':
+      case 'upload_bank':
+      case 'run_sync':
+        await ctx.reply('Используйте кнопки в чате для выполнения этой операции.');
+        break;
+      default:
+        // неизвестные команды просто игнорируем
         break;
     }
   }
@@ -227,6 +218,26 @@ export async function routeUpdate(
         break;
       case 'delete:cancel':
         await handleDeleteCancel(ctx as Parameters<typeof handleDeleteCancel>[0]);
+        break;
+      case 'new_reconciliation': {
+        const user = await findUserByTelegramId(BigInt(ctx.from!.id));
+        if (user) await handleNewReconciliation(ctx as any, user.id);
+        break;
+      }
+      case 'upload_wb_inline':
+        await handleUploadWbInline(ctx as any);
+        break;
+      case 'replace_wb':
+        await handleReplaceWb(ctx as any);
+        break;
+      case 'upload_bank_inline':
+        await handleUploadBankInline(ctx as any);
+        break;
+      case 'replace_bank':
+        await handleReplaceBank(ctx as any);
+        break;
+      case 'run_sync_inline':
+        await handleRunSyncInline(ctx as any);
         break;
     }
   }
