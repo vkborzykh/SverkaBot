@@ -6,7 +6,7 @@ import { findUserByTelegramId } from '@/src/db/repositories/users';
 import { enqueue } from '@/src/lib/jobs/queue';
 import { checkAccess } from '@/src/lib/telegram/access';
 import { msg } from '@/src/lib/telegram/messages.ru';
-import { setSession, clearSession } from '@/src/lib/telegram/session';
+import { setSession, getSessionPayload, updateSessionPayload, clearSession } from '@/src/lib/telegram/session';
 import { isAdmin } from '@/src/lib/telegram/handlers/admin';
 import type { BotContext } from '@/src/lib/telegram/router';
 
@@ -46,66 +46,41 @@ async function handleFileUpload(
 
   const telegramId = BigInt(from.id);
 
-  // Access check
   const user = await findUserByTelegramId(telegramId);
-  if (!user) {
-    await ctx.reply(msg.accessExpired);
-    return;
-  }
-  const access = checkAccess(user);
-  if (access !== 'full') {
-    await ctx.reply(msg.accessExpired);
-    return;
+  if (!user) { await ctx.reply(msg.accessExpired); return; }
+  if (checkAccess(user) !== 'full') { await ctx.reply(msg.accessExpired); return; }
+
+  // --- New reconciliation flow check ---
+  const sessionPayload = await getSessionPayload(telegramId);
+  const sessionState = await (await import('@/src/lib/telegram/session')).getSession(telegramId);
+
+  if (sessionState === 'reconciliation_active') {
+    const slotKey = sourceType === 'WB' ? 'wb_import_id' : 'bank_import_id';
+    if (sessionPayload && sessionPayload[slotKey]) {
+      await ctx.reply(sourceType === 'WB' ? msg.wbAlreadyUploaded : msg.bankAlreadyUploaded);
+      return;
+    }
   }
 
-  // Validate extension
-  if (!validateExtension(doc.fileName, allowedExtensions)) {
-    await ctx.reply(msg.errInvalidFormat);
-    return;
-  }
+  if (!validateExtension(doc.fileName, allowedExtensions)) { await ctx.reply(msg.errInvalidFormat); return; }
+  if (!validateFileSize(doc.fileSizeBytes)) { await ctx.reply(msg.errFileTooLarge); return; }
 
-  // Validate size
-  if (!validateFileSize(doc.fileSizeBytes)) {
-    await ctx.reply(msg.errFileTooLarge);
-    return;
-  }
-
-  // Download file
   let buffer: Buffer;
-  try {
-    buffer = await downloadTelegramFile(doc.fileId);
-  } catch {
-    await ctx.reply(msg.errInvalidFormat);
-    return;
-  }
-
-  // Re-validate buffer size (Telegram's reported size might differ)
-  if (!validateFileSize(buffer.byteLength)) {
-    await ctx.reply(msg.errFileTooLarge);
-    return;
-  }
+  try { buffer = await downloadTelegramFile(doc.fileId); } catch { await ctx.reply(msg.errInvalidFormat); return; }
+  if (!validateFileSize(buffer.byteLength)) { await ctx.reply(msg.errFileTooLarge); return; }
 
   const fileHash = sha256(buffer);
-
-  // Deduplication
   const existing = await findImportByHash(user.id, sourceType, fileHash);
-  if (existing) {
-    await ctx.reply(msg.uploadDuplicateImport(existing.id));
-    return;
-  }
+  if (existing) { await ctx.reply(msg.uploadDuplicateImport(existing.id)); return; }
 
-  // Determine extension
   const ext = doc.fileName.toLowerCase().endsWith('.csv') ? 'csv' : 'xlsx';
 
   try {
-    // Store file
     const storagePath = await storeFile(user.id, fileHash, ext, buffer);
-
-    // Create import record
     const newImport = await createImport({
       user_id: user.id,
       source_type: sourceType,
-      marketplace: sourceType === 'WB' ? 'WB' : null,   // ← ДОБАВЛЕНО
+      marketplace: sourceType === 'WB' ? 'WB' : null,
       storage_path: storagePath,
       original_filename: doc.fileName,
       file_hash: fileHash,
@@ -113,11 +88,17 @@ async function handleFileUpload(
       status: 'RECEIVED',
     });
 
-    // Enqueue parsing job
     const jobType = sourceType === 'WB' ? 'parse_wb' : 'parse_bank';
     await enqueue(jobType, newImport.id, { import_id: newImport.id });
 
-    await clearSession(telegramId);
+    // --- Store import_id in session if reconciliation is active ---
+    if (sessionState === 'reconciliation_active') {
+      const slotKey = sourceType === 'WB' ? 'wb_import_id' : 'bank_import_id';
+      const updatedPayload = { ...(sessionPayload ?? {}), [slotKey]: newImport.id };
+      await updateSessionPayload(telegramId, updatedPayload);
+    }
+
+    await clearSession(telegramId); // clear temporary upload state
 
     if (sourceType === 'WB') {
       await ctx.reply(msg.uploadWbReceived(newImport.id));
@@ -127,8 +108,7 @@ async function handleFileUpload(
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     console.error('[upload] failed to store/enqueue:', err);
-    const showDetail =
-      isAdmin(telegramId) || process.env.DEBUG_UPLOAD_ERRORS === 'true';
+    const showDetail = isAdmin(telegramId) || process.env.DEBUG_UPLOAD_ERRORS === 'true';
     await ctx.reply(showDetail ? `${msg.uploadError}\n\n🔧 ${detail}` : msg.uploadError);
   }
 }
@@ -137,12 +117,8 @@ export async function handleUploadWbCommand(ctx: BotContext): Promise<void> {
   const from = ctx.from;
   if (!from) return;
   const telegramId = BigInt(from.id);
-
   const user = await findUserByTelegramId(telegramId);
-  if (!user || checkAccess(user) !== 'full') {
-    await ctx.reply(msg.accessExpired);
-    return;
-  }
+  if (!user || checkAccess(user) !== 'full') { await ctx.reply(msg.accessExpired); return; }
 
   await setSession(telegramId, 'awaiting_wb_file');
   await ctx.reply(msg.uploadWbPrompt);
@@ -152,28 +128,18 @@ export async function handleUploadBankCommand(ctx: BotContext): Promise<void> {
   const from = ctx.from;
   if (!from) return;
   const telegramId = BigInt(from.id);
-
   const user = await findUserByTelegramId(telegramId);
-  if (!user || checkAccess(user) !== 'full') {
-    await ctx.reply(msg.accessExpired);
-    return;
-  }
+  if (!user || checkAccess(user) !== 'full') { await ctx.reply(msg.accessExpired); return; }
 
   await setSession(telegramId, 'awaiting_bank_file');
   await ctx.reply(msg.uploadBankPrompt);
 }
 
-export async function handleWbFileReceived(
-  ctx: BotContext,
-  doc: DocumentInfo,
-): Promise<void> {
+export async function handleWbFileReceived(ctx: BotContext, doc: DocumentInfo): Promise<void> {
   await handleFileUpload(ctx, doc, 'WB', ['.xlsx']);
 }
 
-export async function handleBankFileReceived(
-  ctx: BotContext,
-  doc: DocumentInfo,
-): Promise<void> {
+export async function handleBankFileReceived(ctx: BotContext, doc: DocumentInfo): Promise<void> {
   await handleFileUpload(ctx, doc, 'BANK', ['.xlsx', '.csv']);
 }
 
