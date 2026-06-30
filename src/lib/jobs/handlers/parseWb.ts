@@ -243,7 +243,7 @@ export async function handleParseWb(job: Job): Promise<void> {
       transactions.push({
         import_id: importId,
         source_type: 'WB',
-        marketplace: 'WB',          // ← ДОБАВЛЕНО
+        marketplace: 'WB',          // ← Фаза 2
         row_number: rowNumber,
         transaction_date: txDate,
         amount_kopeks: c.amount,
@@ -273,7 +273,7 @@ export async function handleParseWb(job: Job): Promise<void> {
   const errorCount = errors.length;
   const parseSuccessRate = totalRows > 0 ? ((successRows / totalRows) * 100).toFixed(2) : '0.00';
 
-  // HIGH_CONFIDENCE → NORMAL
+  // Фаза 2: HIGH_CONFIDENCE → NORMAL
   let qualityStatus: 'NORMAL' | 'LOW_CONFIDENCE' | 'MANUAL_REVIEW' = 'NORMAL';
   if (parseFloat(parseSuccessRate) < 70) qualityStatus = 'MANUAL_REVIEW';
 
@@ -296,11 +296,11 @@ export async function handleParseWb(job: Job): Promise<void> {
     failure_reason: null,
   });
 
-  // ── Уведомление и автозапуск ──
+  // ── Уведомление и автозапуск (новая логика сессий) ──
   if (user?.telegram_id) {
     try {
-      const bankImports = await findImportsByUserId(user.id, { sourceType: 'BANK', status: 'COMPLETED', limit: 1 });
-      const hasBank = bankImports.length > 0;
+      const sessionPayload = await import('@/src/lib/telegram/session').then(m => m.getSessionPayload(user.telegram_id!));
+      const isReconciliationActive = sessionPayload && 'wb_import_id' in (sessionPayload ?? {});
 
       let message = '';
       if (qualityStatus === 'MANUAL_REVIEW') {
@@ -309,21 +309,31 @@ export async function handleParseWb(job: Job): Promise<void> {
         message = `✅ Отчёт WB обработан. Загружено строк: ${successRows}, ошибок: ${errorCount}.`;
       }
 
-      if (hasBank) {
+      if (isReconciliationActive && sessionPayload?.bank_import_id) {
+        // Оба файла загружены в рамках активной сессии → запускаем сверку
         message += '\n\nГотово. Теперь можно запустить сверку.';
-        await notifyUser(user.telegram_id, message);
+        await notifyUser(user.telegram_id!, message);
 
         const { startReconciliation } = await import('@/src/lib/reconciliation/startRun');
-        const result = await startReconciliation({ userId: user.id, wbImportId: importId, bankImportId: bankImports[0].id });
+        const result = await startReconciliation({
+          userId: user.id,
+          wbImportId: importId,
+          bankImportId: sessionPayload.bank_import_id as string,
+        });
         if (!('error' in result)) {
           await enqueue('reconcile', result.run_id, { run_id: result.run_id });
-          await notifyUser(user.telegram_id, `Сверка запущена. Обычно занимает до минуты. Статус: /sync_status ${result.run_id}.`);
+          await notifyUser(user.telegram_id!, `Сверка запущена. Обычно занимает до минуты. Статус: /sync_status ${result.run_id}.`);
         } else {
           console.log('[parseWb] Auto-reconciliation failed:', result.error);
         }
       } else {
-        message += '\n\nТеперь можно загрузить выписку банка.';
-        await notifyUser(user.telegram_id, message);
+        // Нет активной сессии или нет второго файла
+        if (!isReconciliationActive) {
+          message += '\n\nТеперь можно загрузить выписку банка.';
+        } else {
+          message += '\n\nОжидаем загрузки банковской выписки.';
+        }
+        await notifyUser(user.telegram_id!, message);
       }
     } catch (err) {
       console.error('[parseWb] Notification/auto-reconciliation error:', err);
