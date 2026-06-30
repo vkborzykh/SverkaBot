@@ -23,12 +23,53 @@ export const deleteConfirmKeyboard = {
 export const mainMenuKeyboard = {
   reply_markup: {
     keyboard: [
-      [msg.menuNewReconciliation],
-      [msg.menuUploadWb, msg.menuUploadBank],
-      [msg.menuRunSync, msg.menuHistory],
       [msg.menuSubscribe, msg.menuHelp],
-      [msg.menuResetReconciliation],
+      [msg.menuHistory, msg.menuDeleteData],
     ],
     resize_keyboard: true,
+  },
+};
+
+// Inline-клавиатуры для этапов сверки
+
+export const newReconciliationKeyboard = {
+  reply_markup: {
+    inline_keyboard: [
+      [{ text: '🆕 Начать новую сверку', callback_data: 'new_reconciliation' }],
+    ],
+  },
+};
+
+export const uploadWbInlineKeyboard = {
+  reply_markup: {
+    inline_keyboard: [
+      [{ text: '📊 Загрузить WB отчёт', callback_data: 'upload_wb_inline' }],
+    ],
+  },
+};
+
+export const wbCompletedKeyboard = {
+  reply_markup: {
+    inline_keyboard: [
+      [{ text: '🔄 Заменить WB отчёт', callback_data: 'replace_wb' }],
+      [{ text: '🏦 Загрузить выписку', callback_data: 'upload_bank_inline' }],
+    ],
+  },
+};
+
+export const bankCompletedKeyboard = {
+  reply_markup: {
+    inline_keyboard: [
+      [{ text: '🔄 Заменить выписку', callback_data: 'replace_bank' }],
+      [{ text: '🔄 Запустить сверку', callback_data: 'run_sync_inline' }],
+    ],
+  },
+};
+
+export const reconciliationFinishedKeyboard = {
+  reply_markup: {
+    inline_keyboard: [
+      [{ text: '🆕 Начать новую сверку', callback_data: 'new_reconciliation' }],
+    ],
   },
 };
