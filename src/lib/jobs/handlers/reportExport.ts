@@ -9,6 +9,7 @@ import { findUserById } from '@/src/db/repositories/users';
 import { findPrimaryReportByRunId, createReport } from '@/src/db/repositories/reports';
 import { storeReport } from '@/src/lib/ingestion/storage';
 import { buildHtmlReport, type ClaimRow } from '@/src/lib/reports/htmlReport';
+import { clearSession } from '@/src/lib/telegram/session';
 
 // Локальный тип, ранее приходил из csvBuilders
 type MatchedRow = {
@@ -162,5 +163,10 @@ export async function handleReportExport(job: Job): Promise<void> {
     } catch (e) {
       console.error('[reportExport] failed to notify delivery endpoint:', e);
     }
+  }
+
+  // Очистка сессии после завершения отчёта (если пользователь ещё не очищен)
+  if (user?.telegram_id) {
+    await clearSession(user.telegram_id);
   }
 }
