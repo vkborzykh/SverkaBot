@@ -6,7 +6,7 @@ import { findUserByTelegramId } from '@/src/db/repositories/users';
 import { enqueue } from '@/src/lib/jobs/queue';
 import { checkAccess } from '@/src/lib/telegram/access';
 import { msg } from '@/src/lib/telegram/messages.ru';
-import { setSession, getSession, getSessionPayload, updateSessionPayload, clearSession } from '@/src/lib/telegram/session';
+import { setSession, getSessionPayload } from '@/src/lib/telegram/session';
 import { isAdmin } from '@/src/lib/telegram/handlers/admin';
 import type { BotContext } from '@/src/lib/telegram/router';
 
@@ -50,13 +50,6 @@ async function handleFileUpload(
   if (!user) { await ctx.reply(msg.accessExpired); return; }
   if (checkAccess(user) !== 'full') { await ctx.reply(msg.accessExpired); return; }
 
-  // Проверяем, что пользователь находится в активной сессии сверки
-  const sessionState = await getSession(telegramId);
-  if (sessionState !== 'reconciliation_active') {
-    await ctx.reply(msg.uploadNoSession);
-    return;
-  }
-
   const sessionPayload = await getSessionPayload(telegramId) ?? {};
 
   const slotKey = sourceType === 'WB' ? 'wb_import_id' : 'bank_import_id';
@@ -94,11 +87,10 @@ async function handleFileUpload(
     const jobType = sourceType === 'WB' ? 'parse_wb' : 'parse_bank';
     await enqueue(jobType, newImport.id, { import_id: newImport.id });
 
-    // Обновляем сессию: записываем import_id, состояние остаётся reconciliation_active
+    // Обновляем сессию: записываем import_id и возвращаем состояние reconciliation_active
     const updatedPayload = { ...sessionPayload, [slotKey]: newImport.id };
     await setSession(telegramId, 'reconciliation_active', updatedPayload);
 
-    // Отправляем краткое подтверждение
     if (sourceType === 'WB') {
       await ctx.reply(msg.uploadWbReceived);
     } else {
