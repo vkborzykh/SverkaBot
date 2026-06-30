@@ -10,8 +10,10 @@ import { findPrimaryReportByRunId, createReport } from '@/src/db/repositories/re
 import { storeReport } from '@/src/lib/ingestion/storage';
 import { buildHtmlReport, type ClaimRow } from '@/src/lib/reports/htmlReport';
 import { clearSession } from '@/src/lib/telegram/session';
+import { msg } from '@/src/lib/telegram/messages.ru';
+import { reconciliationFinishedKeyboard } from '@/src/lib/telegram/keyboard';
 
-// Локальный тип, ранее приходил из csvBuilders
+// Локальный тип
 type MatchedRow = {
   match_id: string;
   match_type: string;
@@ -19,6 +21,27 @@ type MatchedRow = {
   wb_tx: CanonicalTransaction | undefined;
   bank_tx: CanonicalTransaction | undefined;
 };
+
+async function sendMessageToUser(telegramId: bigint, text: string, keyboard?: any): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  try {
+    const body: any = {
+      chat_id: String(telegramId),
+      text,
+    };
+    if (keyboard) {
+      body.reply_markup = keyboard.reply_markup;
+    }
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    console.error('[reportExport] sendMessageToUser error:', err);
+  }
+}
 
 export async function handleReportExport(job: Job): Promise<void> {
   const runId = (job.payload as Record<string, string>)?.run_id ?? job.entity_id;
@@ -165,8 +188,9 @@ export async function handleReportExport(job: Job): Promise<void> {
     }
   }
 
-  // Очистка сессии после завершения отчёта (если пользователь ещё не очищен)
+  // Очистка сессии и отправка завершающего сообщения
   if (user?.telegram_id) {
     await clearSession(user.telegram_id);
+    await sendMessageToUser(user.telegram_id, msg.reconciliationCompleted, reconciliationFinishedKeyboard);
   }
 }
