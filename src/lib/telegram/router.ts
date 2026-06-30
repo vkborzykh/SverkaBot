@@ -31,6 +31,7 @@ import {
   handleStats,
   handleRetryExport,
 } from './handlers/admin';
+import { handleNewReconciliation, handleResetReconciliation } from './handlers/reconciliationFlow';
 import { msg } from './messages.ru';
 
 export interface BotContext {
@@ -89,8 +90,6 @@ export async function routeUpdate(
 
     const text = message.text.trim();
 
-    // sessionState теперь только 'awaiting_wb_file' и 'awaiting_bank_file'
-
     const commandMap: Record<string, string> = {
       [msg.menuUploadWb]: 'upload_wb',
       [msg.menuUploadBank]: 'upload_bank',
@@ -98,6 +97,8 @@ export async function routeUpdate(
       [msg.menuHistory]: 'history',
       [msg.menuSubscribe]: 'subscribe',
       [msg.menuHelp]: 'help',
+      [msg.menuNewReconciliation]: 'new_reconciliation',
+      [msg.menuResetReconciliation]: 'reset_reconciliation',
     };
 
     let command = '';
@@ -164,6 +165,12 @@ export async function routeUpdate(
     }
 
     switch (command) {
+      case 'new_reconciliation':
+        await handleNewReconciliation(ctx as Parameters<typeof handleNewReconciliation>[0], user.id);
+        break;
+      case 'reset_reconciliation':
+        await handleResetReconciliation(ctx as Parameters<typeof handleResetReconciliation>[0], telegramId);
+        break;
       case 'upload_wb':
         await handleUploadWbCommand(ctx);
         break;
