@@ -10,7 +10,8 @@ export const msg = {
   consentAccepted: (expiryDate: string) =>
     `Вам открыт бесплатный доступ на 7 дней (до ${expiryDate}).`,
 
-  // ── Main menu (постоянное меню – только 4 кнопки) ────────────────────────
+  // ── Main menu ────────────────────────────────────────────────────────────────
+  menuNewReconciliation: '🆕 Начать новую сверку',
   menuSubscribe: '💰 Подписка',
   menuHelp: '❓ Помощь',
   menuHistory: '📜 История',
