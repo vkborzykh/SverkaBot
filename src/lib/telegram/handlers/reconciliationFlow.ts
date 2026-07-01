@@ -69,7 +69,11 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
   try {
     const result = await startReconciliation({ userId: user.id, wbImportId, bankImportId });
     if ('error' in result) {
-      await ctx.reply('Не удалось запустить сверку. Проверьте файлы и попробуйте снова.');
+      if (result.error.code === 'PERIOD_MISMATCH') {
+        await ctx.reply(msg.syncPeriodMismatch);
+      } else {
+        await ctx.reply('Не удалось запустить сверку. Проверьте файлы и попробуйте снова.');
+      }
       return;
     }
     await enqueue('reconcile', result.run_id, { run_id: result.run_id });
