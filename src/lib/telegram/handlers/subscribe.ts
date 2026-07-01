@@ -1,5 +1,8 @@
 import type { Context } from 'telegraf';
 import { findUserByTelegramId } from '@/src/db/repositories/users';
+import { msg } from '../messages.ru';
+
+const SUBSCRIPTION_AMOUNT_KOPEKS = 150000; // 1 500,00 ₽
 
 export async function handleSubscribe(ctx: Context): Promise<void> {
   const from = ctx.from;
@@ -7,23 +10,18 @@ export async function handleSubscribe(ctx: Context): Promise<void> {
 
   const user = await findUserByTelegramId(BigInt(from.id));
   if (!user) {
-    await ctx.reply('Пользователь не найден.');
+    await ctx.reply(msg.accessExpired);
     return;
   }
 
-  const token = process.env.TELEGRAM_PROVIDER_TOKEN;
-  if (!token) {
-    await ctx.reply('Ошибка: платёжный токен не задан.');
-    return;
-  }
-
+  // Отправляем встроенный счёт
   await ctx.replyWithInvoice({
     title: 'Подписка SverkaBot',
-    description: '30 дней полного доступа к сверке выплат Wildberries',
+    description: '30 дней полного доступа к сверке выплат Wildberries: 1 500,00 ₽',
     payload: `sub_${user.id}_${Date.now()}`,
-    provider_token: token,
+    provider_token: process.env.TELEGRAM_PROVIDER_TOKEN!,
     currency: 'RUB',
-    prices: [{ label: 'Подписка на 30 дней', amount: 150000 }],
+    prices: [{ label: 'Оплатить подписку', amount: SUBSCRIPTION_AMOUNT_KOPEKS }],
     need_email: true,
     send_email_to_provider: true,
     provider_data: {
