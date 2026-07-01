@@ -1,4 +1,5 @@
 import { validateFileSize, validateExtension, MAX_FILE_BYTES } from '@/src/lib/ingestion/validate';
+import { replaceWbInlineKeyboard, replaceBankInlineKeyboard } from '../keyboard';
 import { sha256 } from '@/src/lib/ingestion/hash';
 import { storeFile } from '@/src/lib/ingestion/storage';
 import { findImportByHash, createImport } from '@/src/db/repositories/imports';
@@ -71,7 +72,8 @@ async function handleFileUpload(
   // Проверка содержимого (заголовки)
   const contentCheck = await validateFileContent(buffer, ext, sourceType);
   if (!contentCheck.valid) {
-    await ctx.reply(contentCheck.reason!);
+    const keyboard = sourceType === 'WB' ? replaceWbInlineKeyboard : replaceBankInlineKeyboard;
+    await ctx.reply(contentCheck.reason!, { reply_markup: keyboard.reply_markup });
     return;
   }
 
