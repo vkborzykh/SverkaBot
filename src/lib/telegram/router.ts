@@ -1,7 +1,7 @@
 import type { Update, User as TgUser } from 'telegraf/types';
 import { findUserByTelegramId } from '@/src/db/repositories/users';
 import { checkAccess, PROTECTED_COMMANDS } from './access';
-import { getSession, clearSession } from './session';
+import { getSession } from './session';
 import { handleStart, handleConsentAccept, handleConsentDecline } from './handlers/start';
 import {
   handleWbFileReceived,
@@ -40,6 +40,7 @@ export interface BotContext {
   reply(text: string, extra?: unknown): Promise<unknown>;
   answerCbQuery(text?: string): Promise<unknown>;
   answerPreCheckoutQuery(query: { pre_checkout_query_id: string; ok: boolean; error_message?: string }): Promise<unknown>;
+  replyWithInvoice(invoice: any, extra?: any): Promise<unknown>;
   editMessageReplyMarkup(markup: unknown): Promise<unknown>;
   message?: { text?: string };
   callbackQuery?: { data?: string };
@@ -215,7 +216,8 @@ export async function routeUpdate(
         await handleNewReconciliation(ctx as Parameters<typeof handleNewReconciliation>[0], user.id);
         break;
       case 'subscribe':
-        await handleSubscribe(ctx as Parameters<typeof handleSubscribe>[0]);
+        // Передаём контекст как Telegraf Context (он имеет replyWithInvoice)
+        await handleSubscribe(ctx as any);
         break;
       case 'help':
         await handleHelp(ctx as Parameters<typeof handleHelp>[0]);
