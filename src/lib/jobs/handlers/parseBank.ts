@@ -27,7 +27,7 @@ import { normalizeText } from '@/src/lib/parsing/normalize/text';
 import { sha256 } from '@/src/lib/ingestion/hash';
 import { getSetting } from '@/src/lib/settings/settings';
 import { msg } from '@/src/lib/telegram/messages.ru';
-import { bankCompletedKeyboard } from '@/src/lib/telegram/keyboard';
+import { bankCompletedKeyboard, replaceBankInlineKeyboard } from '@/src/lib/telegram/keyboard';
 
 const PARSER_VERSION = 'bank_v1';
 const ROW_LIMIT = 50_000;
@@ -377,11 +377,23 @@ export async function handleParseBank(job: Job): Promise<void> {
 
   updateProfileStats(activeProfileId).catch(() => {});
 
-  // ── Уведомление (без автозапуска) ──
+  // ── Уведомление (без автозапуска, с проверкой периодов) ──
   if (user?.telegram_id) {
     try {
       const sessionPayload = await import('@/src/lib/telegram/session').then(m => m.getSessionPayload(user.telegram_id!));
       const isReconciliationActive = sessionPayload && 'bank_import_id' in (sessionPayload ?? {});
+
+      // Проверка периода, если уже есть готовый WB-отчёт
+      if (isReconciliationActive && periodStart && periodEnd && sessionPayload?.wb_import_id) {
+        const wbImp = await findImportById(sessionPayload.wb_import_id as string);
+        if (wbImp && wbImp.period_start && wbImp.period_end) {
+          const { periodsCover } = await import('@/src/lib/reconciliation/startRun');
+          if (!periodsCover(wbImp.period_start, wbImp.period_end, periodStart, periodEnd, 31)) {
+            await sendWithKeyboard(user.telegram_id, '⚠️ Период банковской выписки не покрывает период отчёта WB. Проверьте файлы.', replaceBankInlineKeyboard);
+            return;
+          }
+        }
+      }
 
       if (isReconciliationActive) {
         await sendWithKeyboard(user.telegram_id, msg.uploadBankCompleted, bankCompletedKeyboard);
