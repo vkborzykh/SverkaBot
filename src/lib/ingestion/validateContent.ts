@@ -12,10 +12,17 @@ const WB_KEYWORDS = [
 ];
 
 // Расширенный список для банковских выписок (русские + английские термины)
+// Добавлены слова, встреченные в выписках Сбера, Т-Банка, Альфа-Банка, Регион Банка
 const BANK_KEYWORDS = [
+  // общие термины
   'дата', 'сумма', 'дебет', 'кредит', 'списание', 'поступление',
   'назначение', 'контрагент', 'описание', 'приход', 'расход',
   'date', 'amount', 'debit', 'credit', 'transaction', 'description',
+  // специфичные для российских выписок
+  'время', 'инн', 'назначение платежа', 'корреспондент', 'бик',
+  'тип операции', 'документ', 'номер документа', 'входящий остаток',
+  'исходящий остаток', 'реквизиты', 'кпп', 'расчётный счёт',
+  'банк', 'период', 'валюта',
 ];
 
 function normalizeHeader(cell: unknown): string {
@@ -41,7 +48,7 @@ async function validateHeaders(
     reason:
       fileType === 'WB'
         ? 'Файл не похож на отчёт Wildberries. Проверьте, что вы загружаете правильный XLSX с колонками: дата, сумма к выплате.'
-        : 'Файл не похож на банковскую выписку. Проверьте, что вы загружаете правильный файл с колонками: дата, сумма, контрагент.',
+        : `Файл не похож на банковскую выписку. Найденные заголовки: ${lowerHeaders.join(', ')}. Ожидаются колонки: дата, сумма, контрагент.`,
   };
 }
 
@@ -52,8 +59,6 @@ async function getHeadersFromXlsx(buffer: Buffer): Promise<unknown[]> {
     const sheet = workbook.Sheets[sheetName];
     if (!sheet) return [];
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null }) as unknown[][];
-    if (rows.length === 0) return [];
-    // Ищем первую непустую строку как заголовок
     for (const row of rows) {
       if (row.some((c) => c !== null && c !== '')) {
         return row;
@@ -79,13 +84,15 @@ async function getHeadersFromCsv(buffer: Buffer): Promise<unknown[]> {
     const str = decode('utf-8') || decode('windows-1251');
     if (!str) return [];
 
+    // Парсим первые 5 строк, чтобы точно найти заголовок
     const result = Papa.parse(str, {
       header: false,
       skipEmptyLines: true,
-      preview: 2,
+      preview: 5,
     });
     const rows = result.data as unknown[][];
     if (rows.length === 0) return [];
+    // Ищем первую непустую строку
     for (const row of rows) {
       if (row.some((c) => c !== null && c !== '')) {
         return row;
