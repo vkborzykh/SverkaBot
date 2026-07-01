@@ -74,3 +74,19 @@ export const reconciliationFinishedKeyboard = {
     ],
   },
 };
+
+export const replaceWbInlineKeyboard = {
+  reply_markup: {
+    inline_keyboard: [
+      [{ text: '🔄 Заменить WB отчёт', callback_data: 'replace_wb' }],
+    ],
+  },
+};
+
+export const replaceBankInlineKeyboard = {
+  reply_markup: {
+    inline_keyboard: [
+      [{ text: '🔄 Заменить выписку', callback_data: 'replace_bank' }],
+    ],
+  },
+};
