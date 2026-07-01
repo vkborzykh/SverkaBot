@@ -1,17 +1,8 @@
 import type { Context } from 'telegraf';
 import { findUserByTelegramId } from '@/src/db/repositories/users';
-import { createOrReusePayment } from '@/src/lib/billing/payment';
 import { msg } from '../messages.ru';
 
-function formatDate(d: Date | null | undefined): string {
-  if (!d) return '—';
-  return d.toLocaleDateString('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    timeZone: 'UTC',
-  });
-}
+const SUBSCRIPTION_AMOUNT_KOPEKS = 150000; // 1500 ₽
 
 export async function handleSubscribe(ctx: Context): Promise<void> {
   const from = ctx.from;
@@ -23,22 +14,28 @@ export async function handleSubscribe(ctx: Context): Promise<void> {
     return;
   }
 
-  const paymentUrl = await createOrReusePayment(user.id);
-
-  switch (user.subscription_status) {
-    case 'TRIAL': {
-      const expiryDate = formatDate(user.trial_expires_at);
-      await ctx.reply(msg.subscribeTrialStatus(expiryDate, paymentUrl));
-      break;
-    }
-    case 'ACTIVE': {
-      const expiryDate = formatDate(user.subscription_end_date);
-      await ctx.reply(msg.subscribeActiveStatus(expiryDate, paymentUrl));
-      break;
-    }
-    case 'EXPIRED':
-    default:
-      await ctx.reply(msg.subscribeExpiredStatus(paymentUrl));
-      break;
-  }
+  // Отправляем встроенный счёт
+  await ctx.replyWithInvoice({
+    title: 'Подписка SverkaBot',
+    description: '30 дней полного доступа к сверке выплат Wildberries',
+    payload: `sub_${user.id}_${Date.now()}`,
+    provider_token: process.env.TELEGRAM_PROVIDER_TOKEN!,
+    currency: 'RUB',
+    prices: [{ label: 'Подписка на 30 дней', amount: SUBSCRIPTION_AMOUNT_KOPEKS }],
+    need_email: true,
+    send_email_to_provider: true,
+    provider_data: {
+      receipt: {
+        items: [{
+          description: 'Подписка SverkaBot 30 дней',
+          quantity: '1.00',
+          amount: {
+            value: '1500.00',
+            currency: 'RUB',
+          },
+          vat_code: 1,
+        }],
+      },
+    },
+  });
 }
