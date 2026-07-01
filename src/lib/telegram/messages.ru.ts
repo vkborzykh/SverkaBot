@@ -1,4 +1,4 @@
-// All user-visible strings for the Telegram bot.
+boar// All user-visible strings for the Telegram bot.
 // Keep every string in Russian. Never add English user-facing strings here.
 
 export const msg = {
@@ -74,7 +74,7 @@ export const msg = {
   syncStatusMissingId: 'Укажите ID сверки: /sync_status <id>',
   syncStatusNotFound: 'Сверка не найдена или не принадлежит вашему аккаунту.',
   syncStatusPending: (runId: string) => `⏳ Сверка ${runId} ожидает обработки.`,
-  syncStatusRunning: (runId: string) => `🔄 Сверка ${runId} выполняется. Пожалуйста, подождите.`,
+  syncStatusRunning: (runId: string) => `🔎 Сверка ${runId} выполняется. Пожалуйста, подождите.`,
   syncStatusDownloadReport: (runId: string) => `Для скачивания отчёта: /get_report ${runId}`,
   syncStatusFailed: (runId: string) =>
     `❌ Сверка завершилась с ошибкой. ID: ${runId}. Попробуйте запустить сверку снова или обратитесь в поддержку.`,
@@ -85,7 +85,7 @@ export const msg = {
     '❓ **Как пользоваться SverkaBot**\n\n' +
     '1. Нажмите «🆕 Начать новую сверку».\n' +
     '2. Загрузите отчёт WB (XLSX) и банковскую выписку (CSV/XLSX) с помощью кнопок.\n' +
-    '3. После обработки обоих файлов нажмите «🔄 Запустить сверку».\n' +
+    '3. После обработки обоих файлов нажмите «🔎 Запустить сверку».\n' +
     '4. Дождитесь завершения и получите HTML-отчёт.\n\n' +
     'За дополнительной помощью обращайтесь в службу технической поддержки: @vBorzykh.',
 
