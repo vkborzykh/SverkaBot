@@ -8,8 +8,6 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// Scheduled entry point (Vercel Cron, daily). Enqueues reminder jobs. Under
-// QUEUE_DRIVER=bull the worker's poller drains them; under 'db' we drain here.
 async function runDaily() {
   const [subReminderId, inactivityId] = await Promise.all([
     enqueue('subscription_reminder', 'daily', { triggered_at: new Date().toISOString() }),
@@ -18,7 +16,7 @@ async function runDaily() {
 
   let processed = 0;
   if ((process.env.QUEUE_DRIVER ?? 'db') !== 'bull') {
-    processed = await drainQueue(); // legacy path only
+    processed = await drainQueue();
   }
 
   return okResponse({
@@ -43,3 +41,4 @@ export async function GET(req: NextRequest) {
   }
   return runDaily();
 }
+// cache bust
