@@ -8,6 +8,7 @@ import { checkAccess } from '@/src/lib/telegram/access';
 import { msg } from '@/src/lib/telegram/messages.ru';
 import { setSession, getSessionPayload } from '@/src/lib/telegram/session';
 import { isAdmin } from '@/src/lib/telegram/handlers/admin';
+import { validateFileContent } from '@/src/lib/ingestion/validateContent';
 import type { BotContext } from '@/src/lib/telegram/router';
 
 export interface DocumentInfo {
@@ -65,11 +66,18 @@ async function handleFileUpload(
   try { buffer = await downloadTelegramFile(doc.fileId); } catch { await ctx.reply(msg.errInvalidFormat); return; }
   if (!validateFileSize(buffer.byteLength)) { await ctx.reply(msg.errFileTooLarge); return; }
 
+  const ext = doc.fileName.toLowerCase().endsWith('.csv') ? 'csv' : 'xlsx';
+
+  // Проверка содержимого (заголовки)
+  const contentCheck = await validateFileContent(buffer, ext, sourceType);
+  if (!contentCheck.valid) {
+    await ctx.reply(contentCheck.reason!);
+    return;
+  }
+
   const fileHash = sha256(buffer);
   const existing = await findImportByHash(user.id, sourceType, fileHash);
   if (existing) { await ctx.reply(msg.uploadDuplicateImport(existing.id)); return; }
-
-  const ext = doc.fileName.toLowerCase().endsWith('.csv') ? 'csv' : 'xlsx';
 
   try {
     const storagePath = await storeFile(user.id, fileHash, ext, buffer);
@@ -87,7 +95,6 @@ async function handleFileUpload(
     const jobType = sourceType === 'WB' ? 'parse_wb' : 'parse_bank';
     await enqueue(jobType, newImport.id, { import_id: newImport.id });
 
-    // Обновляем сессию: записываем import_id и возвращаем состояние reconciliation_active
     const updatedPayload = { ...sessionPayload, [slotKey]: newImport.id };
     await setSession(telegramId, 'reconciliation_active', updatedPayload);
 
