@@ -5,20 +5,15 @@ interface ContentCheckResult {
   reason?: string;
 }
 
-// Ключевые слова для идентификации отчёта WB (стабильный формат)
 const WB_KEYWORDS = [
   'к перечислению продавцу', 'к перечислению', 'к выплате',
   'сумма к выплате', 'дата продажи', 'номер поставки', 'srid',
 ];
 
-// Расширенный список для банковских выписок (русские + английские термины)
-// Добавлены слова, встреченные в выписках Сбера, Т-Банка, Альфа-Банка, Регион Банка
 const BANK_KEYWORDS = [
-  // общие термины
   'дата', 'сумма', 'дебет', 'кредит', 'списание', 'поступление',
   'назначение', 'контрагент', 'описание', 'приход', 'расход',
   'date', 'amount', 'debit', 'credit', 'transaction', 'description',
-  // специфичные для российских выписок
   'время', 'инн', 'назначение платежа', 'корреспондент', 'бик',
   'тип операции', 'документ', 'номер документа', 'входящий остаток',
   'исходящий остаток', 'реквизиты', 'кпп', 'расчётный счёт',
@@ -77,14 +72,23 @@ async function getHeadersFromCsv(buffer: Buffer): Promise<unknown[]> {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const iconv = require('iconv-lite') as typeof import('iconv-lite');
 
-    const decode = (enc: string): string => {
+    // Пробуем две кодировки и выбираем лучшую по количеству русских букв
+    const tryDecode = (enc: string): string => {
       try { return iconv.decode(buffer, enc); } catch { return ''; }
     };
 
-    const str = decode('utf-8') || decode('windows-1251');
+    const utf8Str = tryDecode('utf-8');
+    const winStr = tryDecode('windows-1251');
+
+    const cyrCount = (s: string): number => {
+      // считаем буквы русского алфавита
+      return (s.match(/[а-яА-ЯёЁ]/g) || []).length;
+    };
+
+    const str = cyrCount(winStr) > cyrCount(utf8Str) ? winStr : utf8Str;
     if (!str) return [];
 
-    // Парсим первые 5 строк, чтобы точно найти заголовок
+    // Парсим первые 5 строк, чтобы найти заголовок
     const result = Papa.parse(str, {
       header: false,
       skipEmptyLines: true,
@@ -92,7 +96,6 @@ async function getHeadersFromCsv(buffer: Buffer): Promise<unknown[]> {
     });
     const rows = result.data as unknown[][];
     if (rows.length === 0) return [];
-    // Ищем первую непустую строку
     for (const row of rows) {
       if (row.some((c) => c !== null && c !== '')) {
         return row;
