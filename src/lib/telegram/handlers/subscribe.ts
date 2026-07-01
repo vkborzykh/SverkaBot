@@ -14,10 +14,9 @@ export async function handleSubscribe(ctx: Context): Promise<void> {
     return;
   }
 
-  // Отправляем встроенный счёт
   await ctx.replyWithInvoice({
     title: 'Подписка SverkaBot',
-    description: '30 дней полного доступа к сверке выплат Wildberries: 1 500,00 ₽',
+    description: '30 дней полного доступа к сверке выплат Wildberries',
     payload: `sub_${user.id}_${Date.now()}`,
     provider_token: process.env.TELEGRAM_PROVIDER_TOKEN!,
     currency: 'RUB',
