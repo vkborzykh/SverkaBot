@@ -17,7 +17,7 @@ export const msg = {
   menuHistory: '📜 История',
   menuDeleteData: '🗑 Удалить мои данные',
 
-  // ── Access ──────────────────────────────────────────────────────────────────
+  // ── Access ────────────────────────────────────────────────────────────────────
   accessExpired: 'Ваш доступ завершился. Для продолжения оформите подписку: /subscribe',
   trialAlreadyUsed: 'Вы уже использовали пробный период. Для продолжения оформите подписку: /subscribe',
 
@@ -63,13 +63,8 @@ export const msg = {
   // ── History ─────────────────────────────────────────────────────────────────
   historyHeader: '📜 Последние сверки:',
 
-  // ── Subscription ────────────────────────────────────────────────────────────
-  subscribeTrialStatus: (expiryDate: string, paymentUrl: string) =>
-    `Ваш статус: Пробный период (активен до ${expiryDate}).\n\nСтоимость подписки: 1 500 ₽ за 30 дней.\nОплатить: ${paymentUrl}`,
-  subscribeActiveStatus: (expiryDate: string, paymentUrl: string) =>
-    `Ваш статус: Активна (до ${expiryDate}).\n\nСтоимость продления: 1 500 ₽ за 30 дней.\nПродлить подписку: ${paymentUrl}`,
-  subscribeExpiredStatus: (paymentUrl: string) =>
-    `Ваш доступ закончился.\n\nСтоимость подписки: 1 500 ₽ за 30 дней.\nЧтобы продолжить, оформите подписку: ${paymentUrl}`,
+  // ── Subscription (Telegram Payments) ──────────────────────────────────────
+  subscribePrompt: 'Нажмите «Оплатить» для оформления подписки на 30 дней.',
   subscribeSuccess: (expiryDate: string) =>
     `Оплата прошла успешно! Ваша подписка активна до ${expiryDate}. Спасибо!`,
   subscribeReminderExpiry: 'Ваша подписка закончится через 3 дня. Продлите, чтобы не потерять доступ: /subscribe',
