@@ -1,4 +1,4 @@
-boar// All user-visible strings for the Telegram bot.
+// All user-visible strings for the Telegram bot.
 // Keep every string in Russian. Never add English user-facing strings here.
 
 export const msg = {
