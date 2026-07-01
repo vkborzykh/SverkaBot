@@ -62,7 +62,7 @@ export const bankCompletedKeyboard = {
   reply_markup: {
     inline_keyboard: [
       [{ text: '🔄 Заменить выписку', callback_data: 'replace_bank' }],
-      [{ text: '🔄 Запустить сверку', callback_data: 'run_sync_inline' }],
+      [{ text: '🔎 Запустить сверку', callback_data: 'run_sync_inline' }],
     ],
   },
 };
