@@ -1,7 +1,6 @@
-// Self-contained HTML one-pager for a reconciliation run: expected vs received,
-// unconfirmed payouts, and the claim table. Pure string output (inline CSS + SVG,
-// no external resources) so it works in the ZIP, in a browser, or behind a link —
-// without any server-side rendering pipeline.
+// Self-contained HTML one-pager for a reconciliation run: money-flow breakdown,
+// WB vs bank detail, and a claim section. Pure string output (inline CSS + SVG,
+// no external resources, no JS) — works in a browser, behind a link, or printed.
 
 export interface ClaimRow {
   dateStr: string;
@@ -10,15 +9,35 @@ export interface ClaimRow {
   description: string | null;
 }
 
+export interface ReportTxRow {
+  dateStr: string;
+  amountKopeks: bigint;
+  direction: 'IN' | 'OUT';
+  description: string | null;
+  reference: string | null;
+}
+
 export interface HtmlReportData {
   runId: string;
   dateStr: string;
   status: 'reconciled' | 'underpaid' | 'missing' | 'overpaid';
-  expectedKopeks: bigint;
+  // Financial summary (from wb_net_payout evidence)
+  grossPayoutKopeks: bigint;   // wb_in
+  commissionsKopeks: bigint;   // wb_out
+  expectedKopeks: bigint;      // expected_net
   receivedKopeks: bigint;
-  lossKopeks: bigint;
+  lossKopeks: bigint;          // discrepancy (>0 when short)
+  lossPercent: number | null;  // only when loss > 0
   matchRate: number;
-  claimRows: ClaimRow[];
+  // Detail tables
+  wbRows: ReportTxRow[];
+  wbRowsTotal: number;
+  bankRows: ReportTxRow[];
+  bankRowsTotal: number;
+  // Claim
+  claimAmountKopeks: bigint;   // = discrepancy (the real shortfall)
+  claimPeriod: string;
+  claimRows: ClaimRow[];       // WB payouts (IN) for reference
 }
 
 function rub(kopeks: bigint): string {
@@ -40,6 +59,29 @@ const STATUS_META: Record<HtmlReportData['status'], { label: string; accent: str
   missing: { label: 'Выплата не найдена', accent: '#b3261e', note: 'Поступлений от Wildberries за период не обнаружено.' },
 };
 
+function txTable(rows: ReportTxRow[], total: number, kind: 'wb' | 'bank'): string {
+  if (rows.length === 0) return `<p class="muted">Нет строк.</p>`;
+  const head =
+    kind === 'wb'
+      ? `<tr><th>Дата</th><th>Тип</th><th>Назначение</th><th class="num">Сумма</th></tr>`
+      : `<tr><th>Дата</th><th>Описание</th><th class="num">Сумма</th></tr>`;
+  const body = rows
+    .map((r) => {
+      if (kind === 'wb') {
+        const out = r.direction === 'OUT';
+        return `<tr${out ? ' class="out"' : ''}><td>${esc(r.dateStr)}</td><td>${out ? 'Удержание' : 'Выплата'}</td><td>${esc(
+          r.description ?? r.reference ?? '—',
+        )}</td><td class="num">${rub(r.amountKopeks)}</td></tr>`;
+      }
+      return `<tr><td>${esc(r.dateStr)}</td><td>${esc(r.description ?? r.reference ?? '—')}</td><td class="num">${rub(
+        r.amountKopeks,
+      )}</td></tr>`;
+    })
+    .join('\n        ');
+  const more = total > rows.length ? `<p class="muted">Показаны первые ${rows.length} из ${total} строк.</p>` : '';
+  return `<table><thead>${head}</thead><tbody>\n        ${body}\n      </tbody></table>${more}`;
+}
+
 export function buildHtmlReport(data: HtmlReportData): string {
   const meta = STATUS_META[data.status];
   const exp = Number(data.expectedKopeks);
@@ -48,30 +90,59 @@ export function buildHtmlReport(data: HtmlReportData): string {
   const expW = Math.round((exp / scale) * 100);
   const recW = Math.round((rec / scale) * 100);
   const lossW = Math.max(0, expW - recW);
-
   const hasLoss = data.lossKopeks > BigInt(0);
-  const showClaimTable = hasLoss && data.claimRows.length > 0;
+
+  const breakdown = `
+    <h2>Как получена сумма</h2>
+    <table class="flow"><tbody>
+      <tr><td>Валовые выплаты Wildberries</td><td class="num">${rub(data.grossPayoutKopeks)}</td></tr>
+      <tr><td>− Удержания и комиссии WB</td><td class="num">−${rub(data.commissionsKopeks)}</td></tr>
+      <tr class="sum"><td>Ожидалось к перечислению</td><td class="num">${rub(data.expectedKopeks)}</td></tr>
+      <tr><td>Поступило на счёт</td><td class="num">${rub(data.receivedKopeks)}</td></tr>
+      <tr class="gap"><td>Расхождение${data.lossPercent != null ? ` (${data.lossPercent.toFixed(1)}%)` : ''}</td><td class="num">${rub(data.lossKopeks)}</td></tr>
+    </tbody></table>`;
+
+  const detail = `
+    <h2>Отчёт Wildberries — ${data.wbRowsTotal} стр.</h2>
+    <p class="muted">Что WB отразил как выплаты и удержания за период.</p>
+    ${txTable(data.wbRows, data.wbRowsTotal, 'wb')}
+    <h2>Поступления на счёт — ${data.bankRowsTotal} стр.</h2>
+    <p class="muted">Кредитовые операции из банковской выписки.</p>
+    ${txTable(data.bankRows, data.bankRowsTotal, 'bank')}`;
 
   let claimSection: string;
-  if (showClaimTable) {
+  if (hasLoss) {
+    const tmpl = `Прошу предоставить детализацию выплаты за период ${data.claimPeriod}. По данным сверки с банковской выпиской ожидаемая к перечислению сумма составила ${rub(
+      data.expectedKopeks,
+    )}, фактически поступило ${rub(data.receivedKopeks)}. Расхождение — ${rub(
+      data.claimAmountKopeks,
+    )}. Прошу разъяснить причину расхождения и произвести доплату либо предоставить обоснование удержания.`;
+    const claimTable =
+      data.claimRows.length > 0
+        ? `<p class="muted">Выплаты Wildberries за период (приложите вместе с банковской выпиской):</p>
+    <table><thead><tr><th>№</th><th>Дата</th><th class="num">Сумма</th><th>Документ / SRID</th><th>Назначение</th></tr></thead>
+      <tbody>${data.claimRows
+        .map(
+          (r, i) =>
+            `<tr><td>${i + 1}</td><td>${esc(r.dateStr)}</td><td class="num">${rub(r.amountKopeks)}</td><td>${esc(
+              r.reference ?? '—',
+            )}</td><td>${esc(r.description ?? '—')}</td></tr>`,
+        )
+        .join('')}</tbody></table>`
+        : '';
     claimSection = `
     <h2>Данные для претензии</h2>
-    <p class="muted">Выплаты Wildberries из отчёта за период — приложите к обращению на маркетплейс.</p>
-    <table>
-      <thead><tr><th>№</th><th>Дата</th><th>Сумма</th><th>Документ / SRID</th><th>Назначение</th></tr></thead>
-      <tbody>
-        ${data.claimRows
-          .map(
-            (r, i) =>
-              `<tr><td>${i + 1}</td><td>${esc(r.dateStr)}</td><td class="num">${rub(
-                r.amountKopeks,
-              )}</td><td>${esc(r.reference ?? '—')}</td><td>${esc(r.description ?? '—')}</td></tr>`,
-          )
-          .join('\n        ')}
-      </tbody>
-    </table>`;
+    <div class="claim-amt">Сумма к доплате: <b>${rub(data.claimAmountKopeks)}</b></div>
+    <p class="muted">За период ${esc(data.claimPeriod)} ожидалось ${rub(data.expectedKopeks)}, поступило ${rub(
+      data.receivedKopeks,
+    )}.</p>
+    <div class="tmpl"><div class="tmpl-h">Шаблон обращения — проверьте перед отправкой:</div><div class="tmpl-b">${esc(
+      tmpl,
+    )}</div></div>
+    ${claimTable}
+    <p class="disclaimer">Это шаблон, а не юридически выверенная претензия. Проверьте формулировки и цифры перед отправкой на маркетплейс.</p>`;
   } else {
-    claimSection = `<p class="muted">Все выплаты подтверждены. Данные для претензии отсутствуют.</p>`;
+    claimSection = `<h2>Данные для претензии</h2><p class="muted">Все выплаты подтверждены. Данные для претензии отсутствуют.</p>`;
   }
 
   return `<!doctype html>
@@ -96,6 +167,7 @@ export function buildHtmlReport(data: HtmlReportData): string {
   .fig { flex:1 1 30%; min-width:150px; border:1px solid #e6e6ea; border-radius:12px; padding:14px 16px; }
   .fig .k { color:#6b6b72; font-size:13px; }
   .fig .v { font-size:22px; font-weight:650; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; margin-top:2px; }
+  .fig .pct { color:#b3261e; font-size:12px; margin-top:2px; }
   .fig.loss .v { color:${hasLoss ? '#b3261e' : '#1a7f5a'}; }
   .bars { margin:22px 0 6px; }
   .barrow { display:flex; align-items:center; gap:12px; margin:10px 0; }
@@ -107,11 +179,29 @@ export function buildHtmlReport(data: HtmlReportData): string {
   .barrow .amt { width:130px; text-align:right; font-size:14px; font-variant-numeric:tabular-nums; }
   h2 { font-size:16px; margin:28px 0 6px; }
   .muted { color:#6b6b72; font-size:14px; margin:0 0 10px; }
-  table { width:100%; border-collapse:collapse; font-size:14px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; margin-bottom:6px; }
   th,td { text-align:left; padding:8px 10px; border-bottom:1px solid #eeeef1; vertical-align:top; }
   th { color:#6b6b72; font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:0.03em; }
-  td.num,.amt { font-variant-numeric:tabular-nums; }
+  th.num,td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  tr.out td { color:#8a8a90; }
+  table.flow td { border-bottom:1px solid #f0f0f3; }
+  table.flow tr.sum td { font-weight:650; border-top:2px solid #d9d9df; }
+  table.flow tr.gap td { font-weight:700; color:${hasLoss ? '#b3261e' : '#1a7f5a'}; }
+  .claim-amt { font-size:18px; margin:6px 0 4px; }
+  .claim-amt b { color:#b3261e; font-size:22px; font-variant-numeric:tabular-nums; }
+  .tmpl { border:1px solid #e6e6ea; border-radius:12px; padding:14px 16px; background:#fafafb; margin:12px 0; }
+  .tmpl-h { font-size:12px; text-transform:uppercase; letter-spacing:0.03em; color:#6b6b72; margin-bottom:6px; }
+  .tmpl-b { font-size:14px; white-space:pre-wrap; }
+  .disclaimer { color:#9a9aa2; font-size:12px; margin-top:8px; }
   .foot { color:#9a9aa2; font-size:12px; margin-top:24px; }
+  @media print {
+    body { background:#fff; }
+    .wrap { max-width:none; padding:0; }
+    .card { border:none; border-radius:0; padding:0; }
+    tr { page-break-inside:avoid; }
+    thead { display:table-header-group; }
+    h2 { page-break-after:avoid; }
+  }
 </style>
 </head>
 <body>
@@ -127,8 +217,8 @@ export function buildHtmlReport(data: HtmlReportData): string {
       <div class="fig"><div class="k">Ожидалось к выплате</div><div class="v">${rub(data.expectedKopeks)}</div></div>
       <div class="fig"><div class="k">Поступило</div><div class="v">${rub(data.receivedKopeks)}</div></div>
       <div class="fig loss"><div class="k">Неподтверждённые выплаты</div><div class="v">${rub(
-        data.lossKopeks > BigInt(0) ? data.lossKopeks : BigInt(0),
-      )}</div></div>
+        hasLoss ? data.lossKopeks : BigInt(0),
+      )}</div>${data.lossPercent != null ? `<div class="pct">${data.lossPercent.toFixed(1)}% от ожидаемого</div>` : ''}</div>
     </div>
 
     <div class="bars">
@@ -140,6 +230,10 @@ export function buildHtmlReport(data: HtmlReportData): string {
         <span class="amt">${rub(data.receivedKopeks)}</span></div>
     </div>
     <p class="muted">Процент совпадения: ${data.matchRate.toFixed(1)}%. Красной штриховкой показан недостающий объём.</p>
+
+    ${breakdown}
+
+    ${detail}
 
     ${claimSection}
 
