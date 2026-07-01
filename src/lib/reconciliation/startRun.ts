@@ -23,7 +23,13 @@ function parseDateStr(d: string | null | undefined): Date | null {
   return isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function periodsCover(wbStart: string | null | undefined, wbEnd: string | null | undefined, bankStart: string | null | undefined, bankEnd: string | null | undefined, windowDays: number): boolean {
+export function periodsCover(
+  wbStart: string | null | undefined,
+  wbEnd: string | null | undefined,
+  bankStart: string | null | undefined,
+  bankEnd: string | null | undefined,
+  windowDays: number,
+): boolean {
   if (!wbStart || !wbEnd || !bankStart || !bankEnd) return true;
   const wbS = parseDateStr(wbStart);
   const wbE = parseDateStr(wbEnd);
@@ -31,7 +37,7 @@ function periodsCover(wbStart: string | null | undefined, wbEnd: string | null |
   const bkE = parseDateStr(bankEnd);
   if (!wbS || !wbE || !bkS || !bkE) return true;
   const windowMs = windowDays * 86_400_000;
-  return (wbS.getTime() >= bkS.getTime() - windowMs) && (wbE.getTime() <= bkE.getTime() + windowMs);
+  return wbS.getTime() >= bkS.getTime() - windowMs && wbE.getTime() <= bkE.getTime() + windowMs;
 }
 
 export async function startReconciliation(params: StartRunParams): Promise<StartRunResult> {
@@ -69,11 +75,7 @@ export async function startReconciliation(params: StartRunParams): Promise<Start
     if (wbImp.status !== 'COMPLETED' || bankImp.status !== 'COMPLETED') {
       return { error: { code: 'IMPORT_NOT_COMPLETED', message: 'Import not COMPLETED' } };
     }
-    if (
-      !periodsCover(wbImp.period_start, wbImp.period_end, bankImp.period_start, bankImp.period_end, dateWindowDays)
-    ) {
-      return { error: { code: 'PERIOD_MISMATCH', message: 'Период банковской выписки не покрывает период отчёта WB. Проверьте файлы.' } };
-    }
+    // Проверка периодов для явно переданных импортов теперь делается в вызывающем коде
   } else {
     const [wbImports, bankImports] = await Promise.all([
       findImportsByUserId(userId, { sourceType: 'WB', status: 'COMPLETED' }),
