@@ -7,25 +7,18 @@ import { routeUpdate, type BotContext } from '@/src/lib/telegram/router';
 import { drainQueue } from '@/src/lib/jobs/runner';
 import { runBackground } from '@/src/lib/jobs/background';
 
-// Вебхук обязан работать на Node.js-рантайме (postgres-js и telegraf не
-// совместимы с Edge) и никогда не кэшироваться статически.
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-// Даём время фоновой работе (waitUntil → drainQueue) завершиться после ответа.
-// 60 c — потолок тарифа Hobby.
 export const maxDuration = 60;
 
-// Лёгкий health-check для ручной проверки в браузере (Telegram шлёт только POST).
 export async function GET() {
   return okResponse({ ok: true, hint: 'telegram webhook endpoint (POST only)' });
 }
 
 export async function POST(req: NextRequest) {
-  // 1. Проверка секретного заголовка (возвращает 401, НЕ бросает исключение).
   const guard = requireTelegramSecret(req);
   if (guard) return guard;
 
-  // 2. Парсинг тела запроса.
   let update: Update;
   try {
     update = (await req.json()) as Update;
@@ -34,13 +27,8 @@ export async function POST(req: NextRequest) {
     return errResponse('BAD_REQUEST', 'Invalid JSON', 400);
   }
 
-  // 3-4. ВСЁ ниже обёрнуто так, чтобы при любой ошибке вернуть 200.
-  // Telegram повторяет запросы при не-2xx и помечает вебхук как сбойный в
-  // getWebhookInfo, поэтому ошибку логируем, но подтверждаем приём кодом 200.
   try {
     const updateId = (update as { update_id: number }).update_id;
-
-    // Дедупликация (best-effort: сбой БД не должен блокировать обработку).
     const from = extractFrom(update);
     if (from) {
       try {
@@ -49,7 +37,7 @@ export async function POST(req: NextRequest) {
         if (user) {
           const lastId = user.last_update_id;
           if (lastId !== null && lastId !== undefined && BigInt(updateId) <= lastId) {
-            return okResponse({ ok: true }); // дубликат — игнорируем
+            return okResponse({ ok: true });
           }
           await updateUser(user.id, { last_update_id: BigInt(updateId) });
         }
@@ -58,22 +46,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Основная обработка апдейта.
     await routeUpdate(update, async () => {}, buildCtx);
   } catch (err) {
     console.error('[webhook] FATAL while processing update:', err);
-    // Всё равно 200 — чтобы Telegram не ретраил и getWebhookInfo был чистым.
   }
 
-  // Оппортунистический разгрёб очереди: при любом взаимодействии пользователя
-  // дотягиваем застрявшие задачи (например, повторные попытки после backoff),
-  // не дожидаясь суточного крона. Безопасно благодаря FOR UPDATE SKIP LOCKED.
   runBackground(drainQueue());
-
   return okResponse({ ok: true });
 }
-
-// ---- helpers (именно их случайно потеряли в задеплоенной версии) ----
 
 function extractFrom(update: Update): TgUser | undefined {
   if ('message' in update && update.message && 'from' in update.message) {
@@ -103,7 +83,6 @@ function extractChatId(update: Update): number | undefined {
 
 function flattenExtra(extra: unknown): Record<string, unknown> {
   if (!extra || typeof extra !== 'object') return {};
-  // Telegraf Markup-объекты отдают reply_markup.
   const e = extra as Record<string, unknown>;
   if ('reply_markup' in e) return { reply_markup: e.reply_markup };
   return e;
@@ -112,23 +91,16 @@ function flattenExtra(extra: unknown): Record<string, unknown> {
 function buildCtx(update: Update): BotContext {
   const from = extractFrom(update);
   const chatId = extractChatId(update);
+  const token = process.env.TELEGRAM_BOT_TOKEN;
 
   const sendText = async (text: string, extra?: unknown): Promise<unknown> => {
-    if (!chatId) return;
-    const token = process.env.TELEGRAM_BOT_TOKEN;
-    if (!token) {
-      console.error('[webhook] TELEGRAM_BOT_TOKEN is not set — cannot reply');
-      return;
-    }
+    if (!chatId || !token) return;
     const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text, ...flattenExtra(extra) }),
     });
-    if (!res.ok) {
-      console.error('[webhook] sendMessage failed:', res.status, await res.text());
-    }
-    return;
+    if (!res.ok) console.error('[webhook] sendMessage failed:', res.status, await res.text());
   };
 
   const cbQueryId =
@@ -148,19 +120,40 @@ function buildCtx(update: Update): BotContext {
     from,
     reply: sendText,
     answerCbQuery: async (text?: string) => {
-      if (!cbQueryId) return;
-      const token = process.env.TELEGRAM_BOT_TOKEN;
-      if (!token) return;
+      if (!cbQueryId || !token) return;
       await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ callback_query_id: cbQueryId, text }),
       });
     },
-    editMessageReplyMarkup: async (_markup: unknown) => {
-      if (!chatId || !messageId) return;
-      const token = process.env.TELEGRAM_BOT_TOKEN;
+    answerPreCheckoutQuery: async (query: { pre_checkout_query_id: string; ok: boolean; error_message?: string }) => {
       if (!token) return;
+      await fetch(`https://api.telegram.org/bot${token}/answerPreCheckoutQuery`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pre_checkout_query_id: query.pre_checkout_query_id,
+          ok: query.ok,
+          error_message: query.error_message,
+        }),
+      });
+    },
+    replyWithInvoice: async (invoice: any, extra?: any) => {
+      if (!chatId || !token) return;
+      const body: Record<string, unknown> = {
+        chat_id: chatId,
+        ...invoice,
+      };
+      if (extra) Object.assign(body, extra);
+      await fetch(`https://api.telegram.org/bot${token}/sendInvoice`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    },
+    editMessageReplyMarkup: async (_markup: unknown) => {
+      if (!chatId || !messageId || !token) return;
       await fetch(`https://api.telegram.org/bot${token}/editMessageReplyMarkup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
