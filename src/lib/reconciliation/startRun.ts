@@ -23,13 +23,7 @@ function parseDateStr(d: string | null | undefined): Date | null {
   return isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function periodsOverlap(
-  wbStart: string | null | undefined,
-  wbEnd: string | null | undefined,
-  bankStart: string | null | undefined,
-  bankEnd: string | null | undefined,
-  windowDays: number,
-): boolean {
+function periodsCover(wbStart: string | null | undefined, wbEnd: string | null | undefined, bankStart: string | null | undefined, bankEnd: string | null | undefined, windowDays: number): boolean {
   if (!wbStart || !wbEnd || !bankStart || !bankEnd) return true;
   const wbS = parseDateStr(wbStart);
   const wbE = parseDateStr(wbEnd);
@@ -37,10 +31,7 @@ function periodsOverlap(
   const bkE = parseDateStr(bankEnd);
   if (!wbS || !wbE || !bkS || !bkE) return true;
   const windowMs = windowDays * 86_400_000;
-  return (
-    wbS.getTime() <= bkE.getTime() + windowMs &&
-    bkS.getTime() <= wbE.getTime() + windowMs
-  );
+  return (wbS.getTime() >= bkS.getTime() - windowMs) && (wbE.getTime() <= bkE.getTime() + windowMs);
 }
 
 export async function startReconciliation(params: StartRunParams): Promise<StartRunResult> {
@@ -79,9 +70,9 @@ export async function startReconciliation(params: StartRunParams): Promise<Start
       return { error: { code: 'IMPORT_NOT_COMPLETED', message: 'Import not COMPLETED' } };
     }
     if (
-      !periodsOverlap(wbImp.period_start, wbImp.period_end, bankImp.period_start, bankImp.period_end, dateWindowDays)
+      !periodsCover(wbImp.period_start, wbImp.period_end, bankImp.period_start, bankImp.period_end, dateWindowDays)
     ) {
-      return { error: { code: 'PERIOD_MISMATCH', message: 'Periods do not overlap' } };
+      return { error: { code: 'PERIOD_MISMATCH', message: 'Период банковской выписки не покрывает период отчёта WB. Проверьте файлы.' } };
     }
   } else {
     const [wbImports, bankImports] = await Promise.all([
@@ -101,7 +92,7 @@ export async function startReconciliation(params: StartRunParams): Promise<Start
     let found = false;
     for (const wb of latestWb) {
       for (const bank of latestBank) {
-        if (periodsOverlap(wb.period_start, wb.period_end, bank.period_start, bank.period_end, dateWindowDays)) {
+        if (periodsCover(wb.period_start, wb.period_end, bank.period_start, bank.period_end, dateWindowDays)) {
           wbImportId = wb.id;
           bankImportId = bank.id;
           found = true;
