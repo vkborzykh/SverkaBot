@@ -23,12 +23,12 @@ export function requireAdminToken(req: NextRequest): NextResponse | undefined {
 }
 
 // X-Telegram-Bot-Api-Secret-Token guard — used by the Telegram webhook endpoint.
-export function requireTelegramSecret(
-  req: NextRequest,
-): NextResponse | undefined {
-  const token = req.headers.get('x-telegram-bot-api-secret-token');
-  const expected = process.env.TELEGRAM_WEBHOOK_SECRET;
-  if (!expected || token !== expected) {
-    return errResponse('UNAUTHORIZED', 'Invalid Telegram webhook secret', 401);
+export function requireTelegramSecret(req: NextRequest) {
+  const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  if (!secret) return null; // если секрет не задан, пропускаем (для обратной совместимости)
+  const header = req.headers.get('x-telegram-bot-api-secret-token');
+  if (header !== secret) {
+    return errResponse('UNAUTHORIZED', 'Invalid telegram secret', 401);
   }
+  return null;
 }
