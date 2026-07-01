@@ -1,3 +1,4 @@
+import { createBillingTransaction, findBillingTransactionByProviderTxId } from '@/src/db/repositories/billing-transactions';
 import type { Update, User as TgUser } from 'telegraf/types';
 import { findUserByTelegramId } from '@/src/db/repositories/users';
 import { checkAccess, PROTECTED_COMMANDS } from './access';
@@ -72,16 +73,25 @@ export async function routeUpdate(
     const sp = update.message.successful_payment;
     const telegramId = BigInt(update.message.chat.id);
 
+    // Проверка суммы и валюты на сервере
+    if (sp.total_amount !== 150000 || sp.currency !== 'RUB') {
+      console.error('[successful_payment] Invalid amount or currency', sp.total_amount, sp.currency);
+      return; // тихо игнорируем, не подтверждаем
+    }
+
     try {
       const user = await findUserByTelegramId(telegramId);
       if (user) {
+        // Идемпотентность: ищем транзакцию по charge_id
+        const existing = await findBillingTransactionByProviderTxId(sp.telegram_payment_charge_id);
+        if (existing) {
+          return; // уже обработана
+        }
+
         const { activateSubscription } = await import('@/src/lib/billing/subscription');
         const endDate = await activateSubscription(user.id, 30);
         const formatted = endDate.toLocaleDateString('ru-RU', {
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric',
-          timeZone: 'UTC',
+          day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC',
         });
 
         const { createBillingTransaction } = await import('@/src/db/repositories/billing-transactions');
@@ -102,7 +112,7 @@ export async function routeUpdate(
       await ctx.reply('Произошла ошибка при активации подписки. Пожалуйста, обратитесь в поддержку.');
     }
     return;
-  }
+}
 
   if ('message' in update && update.message) {
     const message = update.message;
