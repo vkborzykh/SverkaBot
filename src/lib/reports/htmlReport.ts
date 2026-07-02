@@ -1,6 +1,7 @@
 // Self-contained HTML one-pager for a reconciliation run: money-flow breakdown,
 // WB vs bank detail, unidentified credits, and a claim section.
 // Pure string output (inline CSS + SVG, no external resources, no JS).
+// Collapsible tables (5 visible rows + fade + toggle) are handled by vanilla JS.
 
 export interface ClaimRow {
   dateStr: string;
@@ -60,44 +61,59 @@ const STATUS_META: Record<HtmlReportData['status'], { label: string; accent: str
   missing: { label: 'Выплата не найдена', accent: '#b3261e', note: 'Поступлений от Wildberries за период не обнаружено.' },
 };
 
-function txTable(rows: ReportTxRow[], total: number, kind: 'wb' | 'bank'): string {
+// ── Table helper (plain table without wrapper) ──
+function buildTable(
+  rows: ReportTxRow[],
+  total: number,
+  kind: 'wb' | 'bank' | 'unidentified' | 'claim',
+): string {
   if (rows.length === 0) return `<p class="muted">Нет строк.</p>`;
-  const head =
-    kind === 'wb'
-      ? `<tr><th>Дата</th><th>Тип</th><th>Назначение</th><th class="num">Сумма</th></tr>`
-      : `<tr><th>Дата</th><th>Описание</th><th class="num">Сумма</th></tr>`;
-  const body = rows
-    .map((r) => {
-      if (kind === 'wb') {
-        const out = r.direction === 'OUT';
-        return `<tr${out ? ' class="out"' : ''}><td>${esc(r.dateStr)}</td><td>${out ? 'Удержание' : 'Выплата'}</td><td>${esc(
-          r.description ?? r.reference ?? '–',
-        )}</td><td class="num">${rub(r.amountKopeks)}</td></tr>`;
-      }
-      return `<tr><td>${esc(r.dateStr)}</td><td>${esc(r.description ?? r.reference ?? '–')}</td><td class="num">${rub(
-        r.amountKopeks,
-      )}</td></tr>`;
-    })
-    .join('\n        ');
-  const more = total > rows.length ? `<p class="muted">Показаны первые ${rows.length} из ${total} строк.</p>` : '';
-  return `<div class="tscroll"><table><thead>${head}</thead><tbody>\n        ${body}\n      </tbody></table></div>${more}`;
+
+  if (kind === 'wb') {
+    const head = `<tr><th>Дата</th><th>Тип</th><th>Назначение</th><th class="num">Сумма</th></tr>`;
+    const body = rows.map((r) => {
+      const out = r.direction === 'OUT';
+      return `<tr${out ? ' class="out"' : ''}><td>${esc(r.dateStr)}</td><td>${out ? 'Удержание' : 'Выплата'}</td><td>${esc(r.description ?? r.reference ?? '–')}</td><td class="num">${rub(r.amountKopeks)}</td></tr>`;
+    }).join('\n');
+    const more = total > rows.length ? `<p class="muted">Показаны первые ${rows.length} из ${total} строк.</p>` : '';
+    return `<table><thead>${head}</thead><tbody>\n${body}\n</tbody></table>${more}`;
+  }
+
+  if (kind === 'bank') {
+    const head = `<tr><th>Дата</th><th>Описание</th><th class="num">Сумма</th></tr>`;
+    const body = rows.map((r) => `<tr><td>${esc(r.dateStr)}</td><td>${esc(r.description ?? r.reference ?? '–')}</td><td class="num">${rub(r.amountKopeks)}</td></tr>`).join('\n');
+    const more = total > rows.length ? `<p class="muted">Показаны первые ${rows.length} из ${total} строк.</p>` : '';
+    return `<table><thead>${head}</thead><tbody>\n${body}\n</tbody></table>${more}`;
+  }
+
+  if (kind === 'unidentified') {
+    const head = `<tr><th>Дата</th><th>Отправитель</th><th>Назначение</th><th class="num">Сумма</th></tr>`;
+    const body = rows.map((r) => `<tr><td>${esc(r.dateStr)}</td><td>${esc(r.counterparty ?? '–')}</td><td>${esc(r.description ?? r.reference ?? '–')}</td><td class="num">${rub(r.amountKopeks)}</td></tr>`).join('\n');
+    const more = total > rows.length ? `<tr><td colspan="4" class="muted">…и ещё ${total - rows.length} стр.</td></tr>` : '';
+    return `<table><thead>${head}</thead><tbody>\n${body}\n${more ? `<tfoot>${more}</tfoot>` : ''}\n</tbody></table>`;
+  }
+
+  if (kind === 'claim') {
+    const head = `<tr><th>№</th><th>Дата</th><th class="num">Сумма</th><th>Документ / SRID</th><th>Назначение</th></tr>`;
+    const body = rows.map((r, i) => `<tr><td>${i + 1}</td><td>${esc(r.dateStr)}</td><td class="num">${rub(r.amountKopeks)}</td><td>${esc(r.reference ?? '–')}</td><td>${esc(r.description ?? '–')}</td></tr>`).join('\n');
+    return `<table><thead>${head}</thead><tbody>\n${body}\n</tbody></table>`;
+  }
+  return '';
 }
 
-function unidentifiedTable(rows: ReportTxRow[], total: number, sum: bigint): string {
-  const body = rows
-    .map(
-      (r) =>
-        `<tr><td>${esc(r.dateStr)}</td><td>${esc(r.counterparty ?? '–')}</td><td>${esc(
-          r.description ?? r.reference ?? '–',
-        )}</td><td class="num">${rub(r.amountKopeks)}</td></tr>`,
-    )
-    .join('\n        ');
-  const more =
-    total > rows.length ? `<tr><td colspan="4" class="muted">…и ещё ${total - rows.length} стр.</td></tr>` : '';
-  return `<div class="tscroll"><table><thead><tr><th>Дата</th><th>Отправитель</th><th>Назначение</th><th class="num">Сумма</th></tr></thead>
-      <tbody>\n        ${body}\n        ${more}
-        <tr class="sum"><td colspan="3">Итого не отнесено к WB</td><td class="num">${rub(sum)}</td></tr>
-      </tbody></table></div>`;
+function wrapCollapsible(tableHtml: string, totalRows: number): string {
+  // Only add wrapper and button if there are rows
+  if (totalRows <= 5) {
+    return `<div class="tscroll">${tableHtml}</div>`;
+  }
+  return `
+    <div class="report-container" data-total-rows="${totalRows}">
+      <div class="table-wrap collapsed">
+        <div class="tscroll">${tableHtml}</div>
+        <div class="fade-overlay"></div>
+      </div>
+      <button class="show-more-btn" style="display:none;">Показать полностью</button>
+    </div>`;
 }
 
 const WHAT_TO_DO_HTML = `
@@ -143,20 +159,26 @@ export function buildHtmlReport(data: HtmlReportData): string {
       <tr class="gap"><td>Расхождение${data.lossPercent != null ? ` (${data.lossPercent.toFixed(1)}%)` : ''}</td><td class="num">${rub(data.lossKopeks)}</td></tr>
     </tbody></table>`;
 
+  const wbTableHtml = buildTable(data.wbRows, data.wbRowsTotal, 'wb');
+  const bankTableHtml = buildTable(data.bankRows, data.bankRowsTotal, 'bank');
+  const unidentifiedTableHtml = data.unidentifiedRowsTotal > 0
+    ? buildTable(data.unidentifiedRows, data.unidentifiedRowsTotal, 'unidentified')
+    : '';
+
   const detail = `
     <h2>Отчёт Wildberries – ${data.wbRowsTotal} стр.</h2>
     <p class="muted">Что WB отразил как выплаты и удержания за период.</p>
-    ${txTable(data.wbRows, data.wbRowsTotal, 'wb')}
+    ${wrapCollapsible(wbTableHtml, data.wbRowsTotal)}
     <h2>Поступления от Wildberries – ${data.bankRowsTotal} стр.</h2>
     <p class="muted">Кредиты, отнесённые к выплатам Wildberries.</p>
-    ${txTable(data.bankRows, data.bankRowsTotal, 'bank')}`;
+    ${wrapCollapsible(bankTableHtml, data.bankRowsTotal)}`;
 
   const unidentified =
     data.unidentifiedRowsTotal > 0
       ? `
     <h2>Неидентифицированные поступления – ${data.unidentifiedRowsTotal} стр.</h2>
     <p class="muted">Кредиты на счёт, не отнесённые к выплатам Wildberries. Возможны возвраты, компенсации или платежи от других контрагентов – проверьте вручную.</p>
-    ${unidentifiedTable(data.unidentifiedRows, data.unidentifiedRowsTotal, data.unidentifiedTotalKopeks)}`
+    ${wrapCollapsible(unidentifiedTableHtml, data.unidentifiedRowsTotal)}`
       : '';
 
   let claimSection: string;
@@ -166,26 +188,26 @@ export function buildHtmlReport(data: HtmlReportData): string {
     )}, фактически поступило ${rub(data.receivedKopeks)}. Расхождение – ${rub(
       data.claimAmountKopeks,
     )}. Прошу разъяснить причину расхождения и произвести доплату либо предоставить обоснование удержания.`;
-    const claimTable =
-      data.claimRows.length > 0
-        ? `<p class="muted">Выплаты Wildberries за период (приложите вместе с банковской выпиской):</p>
-    <div class="tscroll"><table><thead><tr><th>№</th><th>Дата</th><th class="num">Сумма</th><th>Документ / SRID</th><th>Назначение</th></tr></thead>
-      <tbody>${data.claimRows
-        .map(
-          (r, i) =>
-            `<tr><td>${i + 1}</td><td>${esc(r.dateStr)}</td><td class="num">${rub(r.amountKopeks)}</td><td>${esc(
-              r.reference ?? '–',
-            )}</td><td>${esc(r.description ?? '–')}</td></tr>`,
-        )
-        .join('')}</tbody></table></div>`
-        : '';
+    const claimTableHtml = data.claimRows.length > 0
+      ? buildTable(data.claimRows.map((r, i) => ({
+          dateStr: r.dateStr,
+          amountKopeks: r.amountKopeks,
+          direction: 'IN' as const,
+          description: r.description,
+          reference: r.reference,
+          counterparty: null,
+        })), data.claimRows.length, 'claim')
+      : '';
+    const wrappedClaimTable = data.claimRows.length > 0
+      ? wrapCollapsible(claimTableHtml, data.claimRows.length)
+      : '';
     claimSection = `
     <h2>Данные для претензии</h2>
     <div class="claim-amt">Сумма к доплате: <b>${rub(data.claimAmountKopeks)}</b></div>
     <div class="tmpl"><div class="tmpl-h">Шаблон обращения – проверьте перед отправкой:</div><div class="tmpl-b">${esc(
       tmpl,
     )}</div></div>
-    ${claimTable}
+    ${wrappedClaimTable}
     <p class="disclaimer">Это шаблон, а не юридически выверенная претензия. Проверьте формулировки и цифры перед отправкой на маркетплейс.</p>`;
   } else {
     claimSection = `<h2>Данные для претензии</h2><p class="muted">Все выплаты подтверждены. Данные для претензии отсутствуют.</p>`;
@@ -245,6 +267,34 @@ export function buildHtmlReport(data: HtmlReportData): string {
   .tscroll { overflow-x:auto; -webkit-overflow-scrolling:touch; margin-bottom:6px; }
   ol.steps { margin:6px 0 4px; padding-left:20px; font-size:14px; }
   ol.steps li { margin:7px 0; }
+
+  /* Collapsible tables */
+  .report-container { margin-bottom: 12px; }
+  .table-wrap { position: relative; overflow: hidden; transition: max-height 0.5s ease-in-out; }
+  .table-wrap.collapsed { max-height: 250px; }
+  .table-wrap.expanded { max-height: 2000px; }
+  .fade-overlay {
+    position: absolute; bottom: 0; left: 0; right: 0; height: 80px;
+    background: linear-gradient(to bottom, rgba(255,255,255,0), #ffffff);
+    pointer-events: none;
+    transition: opacity 0.5s ease-in-out;
+  }
+  .table-wrap.expanded .fade-overlay { opacity: 0; }
+  .show-more-btn {
+    display: block; margin: 8px 0 0; padding: 8px 16px;
+    background: #fff; border: 1px solid #d0d0d5; border-radius: 8px;
+    color: #1b1b1f; font-size: 13px; cursor: pointer;
+    transition: border-color 0.2s;
+    text-align: left; width: 100%;
+  }
+  .show-more-btn:hover { border-color: #90909a; }
+  .show-more-btn::before { content: '↓ '; font-size: 12px; }
+  .show-more-btn.expanded::before { content: '↑ '; }
+
+  /* Zebra striping for tables */
+  tbody tr:nth-child(even) { background-color: #fafafb; }
+  tbody tr:hover { background-color: #f0f0f3; }
+
   @media (max-width: 600px) {
     .wrap { padding:16px 12px 40px; }
     .card { padding:18px 14px; border-radius:12px; }
@@ -267,6 +317,9 @@ export function buildHtmlReport(data: HtmlReportData): string {
     .seg-exp { background:#ccc !important; }
     .seg-loss { background:#fff !important; background-image:repeating-linear-gradient(45deg,#666 0 4px,#fff 4px 8px) !important; }
     .tscroll { overflow:visible; }
+    .table-wrap.collapsed { max-height: none; }
+    .fade-overlay { display: none; }
+    .show-more-btn { display: none; }
     tr { page-break-inside:avoid; }
     thead { display:table-header-group; }
     h2 { page-break-after:avoid; }
@@ -306,6 +359,44 @@ export function buildHtmlReport(data: HtmlReportData): string {
 
     <div class="foot">Сформировано SverkaBot · ${esc(data.dateStr)}</div>
   </div></div>
+  <script>
+    (function() {
+      // Collapsible tables: show only 5 rows, fade, toggle button
+      document.addEventListener('DOMContentLoaded', function() {
+        const containers = document.querySelectorAll('.report-container');
+        containers.forEach(function(container) {
+          const totalRows = parseInt(container.dataset.totalRows, 10);
+          const tableWrap = container.querySelector('.table-wrap');
+          const btn = container.querySelector('.show-more-btn');
+          if (!tableWrap || !btn || totalRows <= 5) return;
+
+          // Show button and set initial text
+          const hiddenCount = totalRows - 5;
+          btn.style.display = 'block';
+          btn.textContent = 'Показать полностью (скрыто ' + hiddenCount + ' строк)';
+
+          // Toggle on click
+          btn.addEventListener('click', function() {
+            const isExpanded = tableWrap.classList.contains('expanded');
+            if (isExpanded) {
+              tableWrap.classList.remove('expanded');
+              tableWrap.classList.add('collapsed');
+              btn.classList.remove('expanded');
+              btn.textContent = 'Показать полностью (скрыто ' + hiddenCount + ' строк)';
+            } else {
+              tableWrap.classList.add('expanded');
+              tableWrap.classList.remove('collapsed');
+              btn.classList.add('expanded');
+              btn.textContent = 'Свернуть обратно';
+            }
+          });
+
+          // Ensure collapsed state initially
+          tableWrap.classList.add('collapsed');
+        });
+      });
+    })();
+  </script>
 </body>
 </html>`;
 }
