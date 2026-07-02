@@ -71,7 +71,9 @@ async function loadFileBuffer(storagePath: string): Promise<Buffer> {
 
 function extractRows(allRows: unknown[][], headerRowIndex: number): { headerRow: unknown[]; dataRows: unknown[][] } {
   const headerRow = allRows[headerRowIndex] ?? [];
-  const dataRows = allRows.slice(headerRowIndex + 1).filter((r) => r.some((c) => c !== null && c !== ''));
+  const dataRows = allRows
+    .slice(headerRowIndex + 1)
+    .filter((r) => r.some((c) => c !== null && c !== ''));
   return { headerRow, dataRows };
 }
 
@@ -121,12 +123,24 @@ function extractSplitAmount(row: unknown[], outIdx: number, inIdx: number): { am
   return null;
 }
 
+function isServiceRow(row: unknown[]): boolean {
+  const line = row.map((c) => String(c ?? '')).join(' ').toLowerCase();
+  return (
+    line.includes('входящий остаток') ||
+    line.includes('исходящий остаток') ||
+    line.includes('входящий') ||
+    line.includes('исходящий') ||
+    line.includes('остаток')
+  );
+}
+
 function parseXlsxRaw(buffer: Buffer): unknown[][] {
   const XLSX = require('xlsx');
   const wb = XLSX.read(buffer, { type: 'buffer', cellDates: false });
   const sheet = wb.Sheets[wb.SheetNames[0]];
   if (!sheet) return [];
-  return XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null });
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null });
+  return rows.filter((r) => !isServiceRow(r));
 }
 
 function parseCsvRaw(buffer: Buffer): unknown[][] {
@@ -136,7 +150,7 @@ function parseCsvRaw(buffer: Buffer): unknown[][] {
     try {
       const str = iconv.decode(buffer, enc);
       const r = Papa.parse<string[]>(str, { header: false, skipEmptyLines: false, dynamicTyping: false });
-      return r.data as unknown[][];
+      return (r.data as unknown[][]).filter((row) => !isServiceRow(row));
     } catch { return []; }
   };
   const utf8 = tryParse('utf-8');
