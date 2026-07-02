@@ -1,6 +1,6 @@
 // Self-contained HTML one-pager for a reconciliation run: money-flow breakdown,
-// WB vs bank detail, and a claim section. Pure string output (inline CSS + SVG,
-// no external resources, no JS) — works in a browser, behind a link, or printed.
+// WB vs bank detail, unidentified credits, and a claim section.
+// Pure string output (inline CSS + SVG, no external resources, no JS).
 
 export interface ClaimRow {
   dateStr: string;
@@ -15,6 +15,7 @@ export interface ReportTxRow {
   direction: 'IN' | 'OUT';
   description: string | null;
   reference: string | null;
+  counterparty: string | null;
 }
 
 export interface HtmlReportData {
@@ -22,22 +23,26 @@ export interface HtmlReportData {
   dateStr: string;
   status: 'reconciled' | 'underpaid' | 'missing' | 'overpaid';
   // Financial summary (from wb_net_payout evidence)
-  grossPayoutKopeks: bigint;   // wb_in
-  commissionsKopeks: bigint;   // wb_out
-  expectedKopeks: bigint;      // expected_net
+  grossPayoutKopeks: bigint;
+  commissionsKopeks: bigint;
+  expectedKopeks: bigint;
   receivedKopeks: bigint;
-  lossKopeks: bigint;          // discrepancy (>0 when short)
-  lossPercent: number | null;  // only when loss > 0
+  lossKopeks: bigint;
+  lossPercent: number | null;
   matchRate: number;
   // Detail tables
   wbRows: ReportTxRow[];
   wbRowsTotal: number;
   bankRows: ReportTxRow[];
   bankRowsTotal: number;
+  // Section 3 — unidentified bank credits
+  unidentifiedRows: ReportTxRow[];
+  unidentifiedRowsTotal: number;
+  unidentifiedTotalKopeks: bigint;
   // Claim
-  claimAmountKopeks: bigint;   // = discrepancy (the real shortfall)
+  claimAmountKopeks: bigint;
   claimPeriod: string;
-  claimRows: ClaimRow[];       // WB payouts (IN) for reference
+  claimRows: ClaimRow[];
 }
 
 function rub(kopeks: bigint): string {
@@ -82,6 +87,34 @@ function txTable(rows: ReportTxRow[], total: number, kind: 'wb' | 'bank'): strin
   return `<table><thead>${head}</thead><tbody>\n        ${body}\n      </tbody></table>${more}`;
 }
 
+function unidentifiedTable(rows: ReportTxRow[], total: number, sum: bigint): string {
+  const body = rows
+    .map(
+      (r) =>
+        `<tr><td>${esc(r.dateStr)}</td><td>${esc(r.counterparty ?? '—')}</td><td>${esc(
+          r.description ?? r.reference ?? '—',
+        )}</td><td class="num">${rub(r.amountKopeks)}</td></tr>`,
+    )
+    .join('\n        ');
+  const more =
+    total > rows.length ? `<tr><td colspan="4" class="muted">…и ещё ${total - rows.length} стр.</td></tr>` : '';
+  return `<table><thead><tr><th>Дата</th><th>Отправитель</th><th>Назначение</th><th class="num">Сумма</th></tr></thead>
+      <tbody>\n        ${body}\n        ${more}
+        <tr class="sum"><td colspan="3">Итого не отнесено к WB</td><td class="num">${rub(sum)}</td></tr>
+      </tbody></table>`;
+}
+
+const WHAT_TO_DO_HTML = `
+    <h2>Что делать дальше</h2>
+    <ol class="steps">
+      <li>Откройте финансовый отчёт за период: кабинет <b>WB Partners → Финансы → Отчёты</b> («Еженедельный отчёт» и «Детализация»). Сверьте сумму к перечислению с поступлением на расчётный счёт — зачисление обычно приходит с задержкой 2–3 дня.</li>
+      <li>Проверьте крупные удержания в детализации: реклама, штрафы, логистика, платная приёмка и платная услуга ускоренного вывода (комиссия ~4,3%). Часто расхождение объясняется именно ими.</li>
+      <li>Если удержания не покрывают разницу — создайте обращение в поддержку через тикет в личном кабинете <b>WB Partners</b> (seller.wildberries.ru).</li>
+      <li>Приложите к обращению: банковскую выписку по расчётному счёту за период, детализацию финансового отчёта WB и скриншот раздела <b>Финансы → Выплаты</b>. Укажите период и точную сумму расхождения.</li>
+      <li>Проверьте раздел «Неидентифицированные поступления» выше: возможно, часть денег пришла от других контрагентов или как возврат и не относится к выплате WB.</li>
+    </ol>
+    <p class="disclaimer">Названия разделов в кабинете WB со временем меняются — ориентируйтесь на актуальную структуру портала на момент обращения.</p>`;
+
 export function buildHtmlReport(data: HtmlReportData): string {
   const meta = STATUS_META[data.status];
   const exp = Number(data.expectedKopeks);
@@ -109,6 +142,14 @@ export function buildHtmlReport(data: HtmlReportData): string {
     <h2>Поступления на счёт — ${data.bankRowsTotal} стр.</h2>
     <p class="muted">Кредитовые операции из банковской выписки.</p>
     ${txTable(data.bankRows, data.bankRowsTotal, 'bank')}`;
+
+  const unidentified =
+    data.unidentifiedRowsTotal > 0
+      ? `
+    <h2>Неидентифицированные поступления — ${data.unidentifiedRowsTotal} стр.</h2>
+    <p class="muted">Кредиты на счёт, не отнесённые к выплатам Wildberries. Возможны возвраты, компенсации или платежи от других контрагентов — проверьте вручную.</p>
+    ${unidentifiedTable(data.unidentifiedRows, data.unidentifiedRowsTotal, data.unidentifiedTotalKopeks)}`
+      : '';
 
   let claimSection: string;
   if (hasLoss) {
@@ -144,6 +185,8 @@ export function buildHtmlReport(data: HtmlReportData): string {
   } else {
     claimSection = `<h2>Данные для претензии</h2><p class="muted">Все выплаты подтверждены. Данные для претензии отсутствуют.</p>`;
   }
+
+  const whatToDo = hasLoss ? WHAT_TO_DO_HTML : '';
 
   return `<!doctype html>
 <html lang="ru">
@@ -187,6 +230,7 @@ export function buildHtmlReport(data: HtmlReportData): string {
   table.flow td { border-bottom:1px solid #f0f0f3; }
   table.flow tr.sum td { font-weight:650; border-top:2px solid #d9d9df; }
   table.flow tr.gap td { font-weight:700; color:${hasLoss ? '#b3261e' : '#1a7f5a'}; }
+  tbody tr.sum td { font-weight:650; border-top:2px solid #d9d9df; }
   .claim-amt { font-size:18px; margin:6px 0 4px; }
   .claim-amt b { color:#b3261e; font-size:22px; font-variant-numeric:tabular-nums; }
   .tmpl { border:1px solid #e6e6ea; border-radius:12px; padding:14px 16px; background:#fafafb; margin:12px 0; }
@@ -194,6 +238,8 @@ export function buildHtmlReport(data: HtmlReportData): string {
   .tmpl-b { font-size:14px; white-space:pre-wrap; }
   .disclaimer { color:#9a9aa2; font-size:12px; margin-top:8px; }
   .foot { color:#9a9aa2; font-size:12px; margin-top:24px; }
+  ol.steps { margin:6px 0 4px; padding-left:20px; font-size:14px; }
+  ol.steps li { margin:7px 0; }
   @media print {
     body { background:#fff; }
     .wrap { max-width:none; padding:0; }
@@ -235,7 +281,11 @@ export function buildHtmlReport(data: HtmlReportData): string {
 
     ${detail}
 
+    ${unidentified}
+
     ${claimSection}
+
+    ${whatToDo}
 
     <div class="foot">Сформировано автоматически SverkaBot. Оценка носит информационный характер; перед обращением на маркетплейс сверьте данные.</div>
   </div></div>
