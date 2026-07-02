@@ -75,45 +75,46 @@ function txTable(rows: ReportTxRow[], total: number, kind: 'wb' | 'bank'): strin
       if (kind === 'wb') {
         const out = r.direction === 'OUT';
         return `<tr${out ? ' class="out"' : ''}><td>${esc(r.dateStr)}</td><td>${out ? 'Удержание' : 'Выплата'}</td><td>${esc(
-          r.description ?? r.reference ?? '—',
+          r.description ?? r.reference ?? '–',
         )}</td><td class="num">${rub(r.amountKopeks)}</td></tr>`;
       }
-      return `<tr><td>${esc(r.dateStr)}</td><td>${esc(r.description ?? r.reference ?? '—')}</td><td class="num">${rub(
+      return `<tr><td>${esc(r.dateStr)}</td><td>${esc(r.description ?? r.reference ?? '–')}</td><td class="num">${rub(
         r.amountKopeks,
       )}</td></tr>`;
     })
     .join('\n        ');
   const more = total > rows.length ? `<p class="muted">Показаны первые ${rows.length} из ${total} строк.</p>` : '';
-  return `<table><thead>${head}</thead><tbody>\n        ${body}\n      </tbody></table>${more}`;
+  return `<div class="tscroll"><table><thead>${head}</thead><tbody>\n        ${body}\n      </tbody></table></div>${more}`;
 }
 
 function unidentifiedTable(rows: ReportTxRow[], total: number, sum: bigint): string {
   const body = rows
     .map(
       (r) =>
-        `<tr><td>${esc(r.dateStr)}</td><td>${esc(r.counterparty ?? '—')}</td><td>${esc(
-          r.description ?? r.reference ?? '—',
+        `<tr><td>${esc(r.dateStr)}</td><td>${esc(r.counterparty ?? '–')}</td><td>${esc(
+          r.description ?? r.reference ?? '–',
         )}</td><td class="num">${rub(r.amountKopeks)}</td></tr>`,
     )
     .join('\n        ');
   const more =
     total > rows.length ? `<tr><td colspan="4" class="muted">…и ещё ${total - rows.length} стр.</td></tr>` : '';
-  return `<table><thead><tr><th>Дата</th><th>Отправитель</th><th>Назначение</th><th class="num">Сумма</th></tr></thead>
+  return `<div class="tscroll"><table><thead><tr><th>Дата</th><th>Отправитель</th><th>Назначение</th><th class="num">Сумма</th></tr></thead>
       <tbody>\n        ${body}\n        ${more}
         <tr class="sum"><td colspan="3">Итого не отнесено к WB</td><td class="num">${rub(sum)}</td></tr>
-      </tbody></table>`;
+      </tbody></table></div>`;
 }
 
 const WHAT_TO_DO_HTML = `
     <h2>Что делать дальше</h2>
     <ol class="steps">
-      <li>Откройте финансовый отчёт за период: кабинет <b>WB Partners → Финансы → Отчёты</b> («Еженедельный отчёт» и «Детализация»). Сверьте сумму к перечислению с поступлением на расчётный счёт — зачисление обычно приходит с задержкой 2–3 дня.</li>
+      <li>Откройте финансовый отчёт за период: кабинет <b>WB Partners → Финансы → Отчёты</b> («Еженедельный отчёт» и «Детализация»). Сверьте сумму к перечислению с поступлением на расчётный счёт – зачисление обычно приходит с задержкой 2–3 дня.</li>
       <li>Проверьте крупные удержания в детализации: реклама, штрафы, логистика, платная приёмка и платная услуга ускоренного вывода (комиссия ~4,3%). Часто расхождение объясняется именно ими.</li>
-      <li>Если удержания не покрывают разницу — создайте обращение в поддержку через тикет в личном кабинете <b>WB Partners</b> (seller.wildberries.ru).</li>
+      <li>Если удержания не покрывают разницу – создайте обращение в поддержку через тикет в личном кабинете <b>WB Partners</b> (seller.wildberries.ru).</li>
       <li>Приложите к обращению: банковскую выписку по расчётному счёту за период, детализацию финансового отчёта WB и скриншот раздела <b>Финансы → Выплаты</b>. Укажите период и точную сумму расхождения.</li>
-      <li>Проверьте раздел «Неидентифицированные поступления» выше: возможно, часть денег пришла от других контрагентов или как возврат и не относится к выплате WB.</li>
+      <li>Если на счёт приходили платежи от других контрагентов, не примите их за выплату WB – сверьте отправителя по банковской выписке.</li>
     </ol>
-    <p class="disclaimer">Названия разделов в кабинете WB со временем меняются — ориентируйтесь на актуальную структуру портала на момент обращения.</p>`;
+    <a class="btn" href="https://seller.wildberries.ru" target="_blank" rel="noopener">Открыть кабинет WB Partners</a>
+    <p class="disclaimer">Названия разделов в кабинете WB со временем меняются – ориентируйтесь на актуальную структуру портала на момент обращения.</p>`;
 
 export function buildHtmlReport(data: HtmlReportData): string {
   const meta = STATUS_META[data.status];
@@ -124,6 +125,17 @@ export function buildHtmlReport(data: HtmlReportData): string {
   const recW = Math.round((rec / scale) * 100);
   const lossW = Math.max(0, expW - recW);
   const hasLoss = data.lossKopeks > BigInt(0);
+
+  const hero = `
+    <div class="hero">
+      <div class="k">${hasLoss ? 'Неподтверждённые выплаты' : 'Итог сверки'}</div>
+      <div class="v">${hasLoss ? rub(data.lossKopeks) : 'Расхождений нет'}</div>
+      <div class="sub">${
+        hasLoss
+          ? `${data.lossPercent != null ? data.lossPercent.toFixed(1) + '% от ожидаемого · ' : ''}ожидалось ${rub(data.expectedKopeks)}, поступило ${rub(data.receivedKopeks)}`
+          : `поступило ${rub(data.receivedKopeks)} из ${rub(data.expectedKopeks)} ожидаемых`
+      }</div>
+    </div>`;
 
   const breakdown = `
     <h2>Как получена сумма</h2>
@@ -136,18 +148,18 @@ export function buildHtmlReport(data: HtmlReportData): string {
     </tbody></table>`;
 
   const detail = `
-    <h2>Отчёт Wildberries — ${data.wbRowsTotal} стр.</h2>
+    <h2>Отчёт Wildberries – ${data.wbRowsTotal} стр.</h2>
     <p class="muted">Что WB отразил как выплаты и удержания за период.</p>
     ${txTable(data.wbRows, data.wbRowsTotal, 'wb')}
-    <h2>Поступления на счёт — ${data.bankRowsTotal} стр.</h2>
-    <p class="muted">Кредитовые операции из банковской выписки.</p>
+    <h2>Поступления от Wildberries – ${data.bankRowsTotal} стр.</h2>
+    <p class="muted">Кредиты, отнесённые к выплатам Wildberries.</p>
     ${txTable(data.bankRows, data.bankRowsTotal, 'bank')}`;
 
   const unidentified =
     data.unidentifiedRowsTotal > 0
       ? `
-    <h2>Неидентифицированные поступления — ${data.unidentifiedRowsTotal} стр.</h2>
-    <p class="muted">Кредиты на счёт, не отнесённые к выплатам Wildberries. Возможны возвраты, компенсации или платежи от других контрагентов — проверьте вручную.</p>
+    <h2>Неидентифицированные поступления – ${data.unidentifiedRowsTotal} стр.</h2>
+    <p class="muted">Кредиты на счёт, не отнесённые к выплатам Wildberries. Возможны возвраты, компенсации или платежи от других контрагентов – проверьте вручную.</p>
     ${unidentifiedTable(data.unidentifiedRows, data.unidentifiedRowsTotal, data.unidentifiedTotalKopeks)}`
       : '';
 
@@ -155,29 +167,26 @@ export function buildHtmlReport(data: HtmlReportData): string {
   if (hasLoss) {
     const tmpl = `Прошу предоставить детализацию выплаты за период ${data.claimPeriod}. По данным сверки с банковской выпиской ожидаемая к перечислению сумма составила ${rub(
       data.expectedKopeks,
-    )}, фактически поступило ${rub(data.receivedKopeks)}. Расхождение — ${rub(
+    )}, фактически поступило ${rub(data.receivedKopeks)}. Расхождение – ${rub(
       data.claimAmountKopeks,
     )}. Прошу разъяснить причину расхождения и произвести доплату либо предоставить обоснование удержания.`;
     const claimTable =
       data.claimRows.length > 0
         ? `<p class="muted">Выплаты Wildberries за период (приложите вместе с банковской выпиской):</p>
-    <table><thead><tr><th>№</th><th>Дата</th><th class="num">Сумма</th><th>Документ / SRID</th><th>Назначение</th></tr></thead>
+    <div class="tscroll"><table><thead><tr><th>№</th><th>Дата</th><th class="num">Сумма</th><th>Документ / SRID</th><th>Назначение</th></tr></thead>
       <tbody>${data.claimRows
         .map(
           (r, i) =>
             `<tr><td>${i + 1}</td><td>${esc(r.dateStr)}</td><td class="num">${rub(r.amountKopeks)}</td><td>${esc(
-              r.reference ?? '—',
-            )}</td><td>${esc(r.description ?? '—')}</td></tr>`,
+              r.reference ?? '–',
+            )}</td><td>${esc(r.description ?? '–')}</td></tr>`,
         )
-        .join('')}</tbody></table>`
+        .join('')}</tbody></table></div>`
         : '';
     claimSection = `
     <h2>Данные для претензии</h2>
     <div class="claim-amt">Сумма к доплате: <b>${rub(data.claimAmountKopeks)}</b></div>
-    <p class="muted">За период ${esc(data.claimPeriod)} ожидалось ${rub(data.expectedKopeks)}, поступило ${rub(
-      data.receivedKopeks,
-    )}.</p>
-    <div class="tmpl"><div class="tmpl-h">Шаблон обращения — проверьте перед отправкой:</div><div class="tmpl-b">${esc(
+    <div class="tmpl"><div class="tmpl-h">Шаблон обращения – проверьте перед отправкой:</div><div class="tmpl-b">${esc(
       tmpl,
     )}</div></div>
     ${claimTable}
@@ -193,7 +202,7 @@ export function buildHtmlReport(data: HtmlReportData): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Отчёт по сверке — SverkaBot</title>
+<title>Отчёт по сверке – SverkaBot</title>
 <style>
   :root { --accent:${meta.accent}; }
   * { box-sizing: border-box; }
@@ -206,18 +215,16 @@ export function buildHtmlReport(data: HtmlReportData): string {
   .banner { margin:20px 0 8px; padding:14px 16px; border-radius:12px; background:${meta.accent}14; border:1px solid ${meta.accent}33; }
   .banner b { color:${meta.accent}; }
   .banner .note { color:#6b6b72; font-size:14px; margin-top:2px; }
-  .figs { display:flex; gap:14px; flex-wrap:wrap; margin:22px 0 8px; }
-  .fig { flex:1 1 30%; min-width:150px; border:1px solid #e6e6ea; border-radius:12px; padding:14px 16px; }
-  .fig .k { color:#6b6b72; font-size:13px; }
-  .fig .v { font-size:22px; font-weight:650; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; margin-top:2px; }
-  .fig .pct { color:#b3261e; font-size:12px; margin-top:2px; }
-  .fig.loss .v { color:${hasLoss ? '#b3261e' : '#1a7f5a'}; }
+  .hero { margin:18px 0 10px; padding:18px 20px; border-radius:14px; border:1px solid ${meta.accent}55; background:${meta.accent}0F; }
+  .hero .k { color:#6b6b72; font-size:13px; }
+  .hero .v { font-size:34px; font-weight:700; letter-spacing:-0.02em; font-variant-numeric:tabular-nums; color:var(--accent); line-height:1.1; margin-top:2px; }
+  .hero .sub { color:#5c5c63; font-size:13px; margin-top:5px; }
   .bars { margin:22px 0 6px; }
   .barrow { display:flex; align-items:center; gap:12px; margin:10px 0; }
   .barrow .lbl { width:96px; color:#6b6b72; font-size:13px; }
   .track { flex:1; background:#f0f0f3; border-radius:8px; height:22px; overflow:hidden; display:flex; }
   .seg-rec { background:${meta.accent}; height:100%; }
-  .seg-loss { background:repeating-linear-gradient(45deg,#b3261e,#b3261e 6px,#cf4b43 6px,#cf4b43 12px); height:100%; }
+  .seg-loss { background-color:var(--accent); background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.35) 0 6px,transparent 6px 12px); height:100%; }
   .seg-exp { background:#c9c9d0; height:100%; }
   .barrow .amt { width:130px; text-align:right; font-size:14px; font-variant-numeric:tabular-nums; }
   h2 { font-size:16px; margin:28px 0 6px; }
@@ -229,21 +236,41 @@ export function buildHtmlReport(data: HtmlReportData): string {
   tr.out td { color:#8a8a90; }
   table.flow td { border-bottom:1px solid #f0f0f3; }
   table.flow tr.sum td { font-weight:650; border-top:2px solid #d9d9df; }
-  table.flow tr.gap td { font-weight:700; color:${hasLoss ? '#b3261e' : '#1a7f5a'}; }
+  table.flow tr.gap td { font-weight:700; color:var(--accent); }
   tbody tr.sum td { font-weight:650; border-top:2px solid #d9d9df; }
   .claim-amt { font-size:18px; margin:6px 0 4px; }
-  .claim-amt b { color:#b3261e; font-size:22px; font-variant-numeric:tabular-nums; }
+  .claim-amt b { color:var(--accent); font-size:20px; font-variant-numeric:tabular-nums; }
   .tmpl { border:1px solid #e6e6ea; border-radius:12px; padding:14px 16px; background:#fafafb; margin:12px 0; }
   .tmpl-h { font-size:12px; text-transform:uppercase; letter-spacing:0.03em; color:#6b6b72; margin-bottom:6px; }
   .tmpl-b { font-size:14px; white-space:pre-wrap; }
-  .disclaimer { color:#9a9aa2; font-size:12px; margin-top:8px; }
-  .foot { color:#9a9aa2; font-size:12px; margin-top:24px; }
+  .btn { display:inline-block; margin:10px 0 2px; padding:10px 16px; border-radius:10px; background:var(--accent); color:#fff; font-size:14px; font-weight:600; text-decoration:none; }
+  .disclaimer { color:#6f6f77; font-size:12px; margin-top:8px; }
+  .foot { color:#6f6f77; font-size:12px; margin-top:24px; }
+  .tscroll { overflow-x:auto; -webkit-overflow-scrolling:touch; margin-bottom:6px; }
   ol.steps { margin:6px 0 4px; padding-left:20px; font-size:14px; }
   ol.steps li { margin:7px 0; }
+  @media (max-width: 600px) {
+    .wrap { padding:16px 12px 40px; }
+    .card { padding:18px 14px; border-radius:12px; }
+    h1 { font-size:18px; }
+    .hero .v { font-size:28px; }
+    .barrow .lbl { width:68px; font-size:12px; }
+    .barrow .amt { width:auto; min-width:88px; font-size:13px; }
+    table { font-size:13px; }
+    th,td { padding:6px 7px; }
+    .tmpl-b { font-size:13px; }
+  }
   @media print {
+    * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
     body { background:#fff; }
     .wrap { max-width:none; padding:0; }
     .card { border:none; border-radius:0; padding:0; }
+    .hero { border-color:#999; background:#f4f4f4 !important; }
+    .track { border:1px solid #ccc; }
+    .seg-rec { background:#555 !important; background-image:none !important; }
+    .seg-exp { background:#ccc !important; }
+    .seg-loss { background:#fff !important; background-image:repeating-linear-gradient(45deg,#666 0 4px,#fff 4px 8px) !important; }
+    .tscroll { overflow:visible; }
     tr { page-break-inside:avoid; }
     thead { display:table-header-group; }
     h2 { page-break-after:avoid; }
@@ -259,13 +286,7 @@ export function buildHtmlReport(data: HtmlReportData): string {
 
     <div class="banner"><b>${meta.label}</b><div class="note">${meta.note}</div></div>
 
-    <div class="figs">
-      <div class="fig"><div class="k">Ожидалось к выплате</div><div class="v">${rub(data.expectedKopeks)}</div></div>
-      <div class="fig"><div class="k">Поступило</div><div class="v">${rub(data.receivedKopeks)}</div></div>
-      <div class="fig loss"><div class="k">Неподтверждённые выплаты</div><div class="v">${rub(
-        hasLoss ? data.lossKopeks : BigInt(0),
-      )}</div>${data.lossPercent != null ? `<div class="pct">${data.lossPercent.toFixed(1)}% от ожидаемого</div>` : ''}</div>
-    </div>
+    ${hero}
 
     <div class="bars">
       <div class="barrow"><span class="lbl">Ожидалось</span>
@@ -275,7 +296,7 @@ export function buildHtmlReport(data: HtmlReportData): string {
         <div class="track"><div class="seg-rec" style="width:${recW}%"></div><div class="seg-loss" style="width:${lossW}%"></div></div>
         <span class="amt">${rub(data.receivedKopeks)}</span></div>
     </div>
-    <p class="muted">Процент совпадения: ${data.matchRate.toFixed(1)}%. Красной штриховкой показан недостающий объём.</p>
+    ${hasLoss ? `<p class="muted">Штриховкой отмечен недостающий объём.</p>` : ''}
 
     ${breakdown}
 
@@ -287,7 +308,7 @@ export function buildHtmlReport(data: HtmlReportData): string {
 
     ${whatToDo}
 
-    <div class="foot">Сформировано автоматически SverkaBot. Оценка носит информационный характер; перед обращением на маркетплейс сверьте данные.</div>
+    <div class="foot">Сформировано SverkaBot · ${esc(data.dateStr)}</div>
   </div></div>
 </body>
 </html>`;
