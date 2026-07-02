@@ -22,7 +22,6 @@ export interface HtmlReportData {
   runId: string;
   dateStr: string;
   status: 'reconciled' | 'underpaid' | 'missing' | 'overpaid';
-  // Financial summary (from wb_net_payout evidence)
   grossPayoutKopeks: bigint;
   commissionsKopeks: bigint;
   expectedKopeks: bigint;
@@ -30,16 +29,13 @@ export interface HtmlReportData {
   lossKopeks: bigint;
   lossPercent: number | null;
   matchRate: number;
-  // Detail tables
   wbRows: ReportTxRow[];
   wbRowsTotal: number;
   bankRows: ReportTxRow[];
   bankRowsTotal: number;
-  // Section 3 — unidentified bank credits
   unidentifiedRows: ReportTxRow[];
   unidentifiedRowsTotal: number;
   unidentifiedTotalKopeks: bigint;
-  // Claim
   claimAmountKopeks: bigint;
   claimPeriod: string;
   claimRows: ClaimRow[];
@@ -60,7 +56,7 @@ function esc(s: string): string {
 const STATUS_META: Record<HtmlReportData['status'], { label: string; accent: string; note: string }> = {
   reconciled: { label: 'Расхождений не найдено', accent: '#1a7f5a', note: 'Сумма поступлений совпала с ожидаемой выплатой.' },
   overpaid: { label: 'Поступило больше ожидаемого', accent: '#1a7f5a', note: 'На счёт пришло больше, чем ожидалось по отчёту WB.' },
-  underpaid: { label: 'Возможная недоплата', accent: '#e67e22', note: 'Поступило меньше ожидаемого. Проверьте расхождение.' },
+  underpaid: { label: 'Обнаружена недоплата', accent: '#e67e22', note: 'Поступило меньше ожидаемого. Проверьте расхождение.' },
   missing: { label: 'Выплата не найдена', accent: '#b3261e', note: 'Поступлений от Wildberries за период не обнаружено.' },
 };
 
