@@ -148,7 +148,15 @@ export async function handleParseWb(job: Job): Promise<void> {
     return;
   }
 
-  const sheetName = workbook.SheetNames[0];
+  // Поиск листа детализации по ключевому слову
+  const sheetNames = workbook.SheetNames;
+  let sheetName = sheetNames[0];
+  for (const name of sheetNames) {
+    if (name.toLowerCase().includes('детализац')) {
+      sheetName = name;
+      break;
+    }
+  }
   const sheet = workbook.Sheets[sheetName];
   if (!sheet) {
     await updateImport(importId, { status: 'FAILED', failure_reason: 'Empty workbook: no sheets found' });
