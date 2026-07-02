@@ -72,23 +72,14 @@ async function getHeadersFromCsv(buffer: Buffer): Promise<unknown[]> {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const iconv = require('iconv-lite') as typeof import('iconv-lite');
 
-    // Пробуем две кодировки и выбираем лучшую по количеству русских букв
-    const tryDecode = (enc: string): string => {
-      try { return iconv.decode(buffer, enc); } catch { return ''; }
-    };
+    // Пробуем UTF-8. Если есть кириллица – используем её.
+    const utf8Str = iconv.decode(buffer, 'utf-8');
+    const hasCyrillic = /[а-яА-ЯёЁ]/.test(utf8Str);
 
-    const utf8Str = tryDecode('utf-8');
-    const winStr = tryDecode('windows-1251');
-
-    const cyrCount = (s: string): number => {
-      // считаем буквы русского алфавита
-      return (s.match(/[а-яА-ЯёЁ]/g) || []).length;
-    };
-
-    const str = cyrCount(winStr) > cyrCount(utf8Str) ? winStr : utf8Str;
+    // Если UTF-8 не дал кириллицы, пробуем Windows-1251
+    const str = hasCyrillic ? utf8Str : iconv.decode(buffer, 'windows-1251');
     if (!str) return [];
 
-    // Парсим первые 5 строк, чтобы найти заголовок
     const result = Papa.parse(str, {
       header: false,
       skipEmptyLines: true,
