@@ -1,6 +1,7 @@
 import type { Job } from '@/src/db/repositories/jobs';
 import { findRunById } from '@/src/db/repositories/reconciliation-runs';
 import { findMatchesByRunId } from '@/src/db/repositories/reconciliation-matches';
+import { findMatchItemsByMatchId } from '@/src/db/repositories/reconciliation-match-items';
 import { findEvidenceByMatchId } from '@/src/db/repositories/reconciliation-evidence';
 import { findTransactionsByImportId, type CanonicalTransaction } from '@/src/db/repositories/canonical-transactions';
 import { findUserById } from '@/src/db/repositories/users';
@@ -48,14 +49,21 @@ export async function handleReportExport(job: Job): Promise<void> {
     findMatchesByRunId(runId),
   ]);
 
-  // ── Aggregate financials from the wb_net_payout strategy evidence ──
+  // ── Aggregate financials + which bank credits were attributed to WB ──
   let grossPayoutKopeks = BigInt(0);
   let commissionsKopeks = BigInt(0);
   let expectedKopeks = BigInt(0);
   let receivedKopeks = BigInt(0);
   let aggStatus: 'reconciled' | 'underpaid' | 'missing' | 'overpaid' = 'reconciled';
+  const matchedBankTxIds = new Set<string>();
   for (const match of matches) {
-    const ev = await findEvidenceByMatchId(match.id);
+    const [ev, items] = await Promise.all([
+      findEvidenceByMatchId(match.id),
+      findMatchItemsByMatchId(match.id),
+    ]);
+    for (const it of items) {
+      if (it.side === 'BANK') matchedBankTxIds.add(it.transaction_id);
+    }
     const pen = ev?.penalties as Record<string, unknown> | undefined;
     if (pen && pen.strategy === 'wb_net_payout') {
       grossPayoutKopeks = BigInt(String(pen.wb_in_kopeks ?? '0'));
@@ -63,7 +71,6 @@ export async function handleReportExport(job: Job): Promise<void> {
       expectedKopeks = BigInt(String(pen.expected_net_kopeks ?? '0'));
       receivedKopeks = BigInt(String(pen.received_kopeks ?? '0'));
       aggStatus = (pen.status as typeof aggStatus) ?? 'reconciled';
-      break;
     }
   }
   const lossKopeks = expectedKopeks - receivedKopeks > BigInt(0) ? expectedKopeks - receivedKopeks : BigInt(0);
@@ -95,6 +102,7 @@ export async function handleReportExport(job: Job): Promise<void> {
     direction: (tx.direction as string) === 'OUT' ? 'OUT' : 'IN',
     description: tx.description,
     reference: tx.reference,
+    counterparty: tx.counterparty,
   });
 
   // ── Detail tables (capped for very large imports) ──
@@ -104,6 +112,14 @@ export async function handleReportExport(job: Job): Promise<void> {
     .sort((a, b) => timeOf(a.transaction_date) - timeOf(b.transaction_date));
   const wbRows = wbSorted.slice(0, MAX_REPORT_ROWS).map(toRow);
   const bankRows = bankCredits.slice(0, MAX_REPORT_ROWS).map(toRow);
+
+  // ── Section 3: unidentified bank credits ──
+  const unidentified = bankCredits.filter((t) => !matchedBankTxIds.has(t.id));
+  const unidentifiedTotalKopeks = unidentified.reduce(
+    (s, t) => s + (t.amount_kopeks ?? BigInt(0)),
+    BigInt(0),
+  );
+  const unidentifiedRows = unidentified.slice(0, MAX_REPORT_ROWS).map(toRow);
 
   // ── Claim: amount = actual shortfall (discrepancy), NOT the full turnover ──
   const claimAmountKopeks = lossKopeks;
@@ -136,6 +152,9 @@ export async function handleReportExport(job: Job): Promise<void> {
     wbRowsTotal: wbTxs.length,
     bankRows,
     bankRowsTotal: bankCredits.length,
+    unidentifiedRows,
+    unidentifiedRowsTotal: unidentified.length,
+    unidentifiedTotalKopeks,
     claimAmountKopeks,
     claimPeriod,
     claimRows,
