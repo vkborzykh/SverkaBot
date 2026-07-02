@@ -30,6 +30,15 @@ async function sendMessageToUser(telegramId: bigint, text: string, keyboard?: an
   }
 }
 
+// Форматирование копеек в рубли с разделителями
+function rub(kopeks: bigint): string {
+  const neg = kopeks < BigInt(0);
+  const a = neg ? -kopeks : kopeks;
+  const whole = (a / BigInt(100)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '\u00A0');
+  const cents = (a % BigInt(100)).toString().padStart(2, '0');
+  return `${neg ? '−' : ''}${whole},${cents}\u00A0₽`;
+}
+
 export async function handleReportExport(job: Job): Promise<void> {
   const runId = (job.payload as Record<string, string>)?.run_id ?? job.entity_id;
   if (!runId) throw new Error('Missing run_id in report_export job payload');
@@ -110,8 +119,9 @@ export async function handleReportExport(job: Job): Promise<void> {
   const bankCredits = [...bankTxs]
     .filter((t) => ((t.direction as string) ?? 'IN') !== 'OUT')
     .sort((a, b) => timeOf(a.transaction_date) - timeOf(b.transaction_date));
+  const wbBankCredits = bankCredits.filter((t) => matchedBankTxIds.has(t.id));
   const wbRows = wbSorted.slice(0, MAX_REPORT_ROWS).map(toRow);
-  const bankRows = bankCredits.slice(0, MAX_REPORT_ROWS).map(toRow);
+  const bankRows = wbBankCredits.slice(0, MAX_REPORT_ROWS).map(toRow);
 
   // ── Section 3: unidentified bank credits ──
   const unidentified = bankCredits.filter((t) => !matchedBankTxIds.has(t.id));
@@ -125,7 +135,7 @@ export async function handleReportExport(job: Job): Promise<void> {
   const claimAmountKopeks = lossKopeks;
   const wbTimes = wbTxs.map((t) => timeOf(t.transaction_date)).filter((n) => n > 0);
   const claimPeriod = wbTimes.length
-    ? `${fmtDmy(new Date(Math.min(...wbTimes)))} — ${fmtDmy(new Date(Math.max(...wbTimes)))}`
+    ? `${fmtDmy(new Date(Math.min(...wbTimes)))} – ${fmtDmy(new Date(Math.max(...wbTimes)))}`
     : fmtDmy(run.created_at);
   const claimRows: ClaimRow[] = wbSorted
     .filter((tx) => ((tx.direction as string) ?? 'IN') !== 'OUT')
@@ -151,7 +161,7 @@ export async function handleReportExport(job: Job): Promise<void> {
     wbRows,
     wbRowsTotal: wbTxs.length,
     bankRows,
-    bankRowsTotal: bankCredits.length,
+    bankRowsTotal: wbBankCredits.length,
     unidentifiedRows,
     unidentifiedRowsTotal: unidentified.length,
     unidentifiedTotalKopeks,
@@ -187,7 +197,18 @@ export async function handleReportExport(job: Job): Promise<void> {
   }
 
   if (user?.telegram_id) {
+    // Если есть недоплата, отправляем персонализированное сообщение
+    if (lossKopeks > BigInt(0)) {
+      await sendMessageToUser(
+        user.telegram_id,
+        `🔍 Обнаружена недоплата: ${rub(lossKopeks)}. Отчёт отправлен.`,
+      );
+    }
     await clearSession(user.telegram_id);
-    await sendMessageToUser(user.telegram_id, msg.reconciliationCompleted, reconciliationFinishedKeyboard);
+    await sendMessageToUser(
+      user.telegram_id,
+      msg.reconciliationCompleted,
+      reconciliationFinishedKeyboard,
+    );
   }
 }
