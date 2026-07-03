@@ -135,7 +135,7 @@ export async function handleReconcile(job: Job): Promise<void> {
       } else {
         // Бесплатный пользователь: показываем итоги и предлагаем подписку
         message += '\n\n🔓 Это бесплатная сверка. Полный отчёт с детализацией, неидентифицированными поступлениями и готовым шаблоном претензии доступен по подписке.';
-        message += '\nОформите подписку за 1 500 ₽/30 дней – /subscribe';
+        message += '\nОформите подписку за 1 500 ₽ на 30 дней – /subscribe';
       }
 
       await notifyUser(user.telegram_id, message);
