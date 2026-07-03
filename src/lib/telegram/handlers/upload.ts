@@ -1,11 +1,9 @@
 import { validateFileSize, validateExtension, MAX_FILE_BYTES } from '@/src/lib/ingestion/validate';
-import { replaceWbInlineKeyboard, replaceBankInlineKeyboard } from '../keyboard';
 import { sha256 } from '@/src/lib/ingestion/hash';
 import { storeFile } from '@/src/lib/ingestion/storage';
 import { findImportByHash, createImport } from '@/src/db/repositories/imports';
 import { findUserByTelegramId } from '@/src/db/repositories/users';
 import { enqueue } from '@/src/lib/jobs/queue';
-import { checkAccess } from '@/src/lib/telegram/access';
 import { msg } from '@/src/lib/telegram/messages.ru';
 import { setSession, getSessionPayload } from '@/src/lib/telegram/session';
 import { isAdmin } from '@/src/lib/telegram/handlers/admin';
@@ -50,7 +48,6 @@ async function handleFileUpload(
 
   const user = await findUserByTelegramId(telegramId);
   if (!user) { await ctx.reply(msg.accessExpired); return; }
-  if (checkAccess(user) !== 'full') { await ctx.reply(msg.accessExpired); return; }
 
   const sessionPayload = await getSessionPayload(telegramId) ?? {};
 
@@ -69,11 +66,9 @@ async function handleFileUpload(
 
   const ext = doc.fileName.toLowerCase().endsWith('.csv') ? 'csv' : 'xlsx';
 
-  // Проверка содержимого (заголовки)
   const contentCheck = await validateFileContent(buffer, ext, sourceType);
   if (!contentCheck.valid) {
-    const keyboard = sourceType === 'WB' ? replaceWbInlineKeyboard : replaceBankInlineKeyboard;
-    await ctx.reply(contentCheck.reason!, { reply_markup: keyboard.reply_markup });
+    await ctx.reply(contentCheck.reason!);
     return;
   }
 
