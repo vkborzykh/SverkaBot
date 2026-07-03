@@ -4,6 +4,7 @@ import { findUserById } from '@/src/db/repositories/users';
 import { findImportById } from '@/src/db/repositories/imports';
 import { reconcileWbPayout, type WbPayoutResult } from '@/src/lib/reconciliation/wbPayout';
 import { enqueue } from '@/src/lib/jobs/queue';
+import { clearSession } from '@/src/lib/telegram/session';
 
 async function notifyUser(telegramId: bigint, text: string): Promise<void> {
   console.log(`[notifyUser] Attempting to send to ${telegramId}: ${text.slice(0, 50)}...`);
@@ -52,7 +53,7 @@ function buildUserMessage(r: WbPayoutResult): string {
       message += '\nРасхождений не найдено.';
       break;
     case 'overpaid':
-      message += '\nПоступило больше ожидаемого — расхождений в вашу пользу.';
+      message += '\nПоступило больше ожидаемого – расхождений в вашу пользу.';
       break;
     case 'underpaid':
       message += `\nВозможная недоплата: ${rub(r.discrepancyKopeks)}.`;
@@ -95,7 +96,7 @@ export async function handleReconcile(job: Job): Promise<void> {
     const result = await reconcileWbPayout(run);
     console.log(`[handleReconcile] Reconcile result status: ${result.status}`);
 
-    // Канонические метрики (Фаза 3)
+    // Канонические метрики
     const turnoverKopeks = result.expectedNetKopeks;
     const diff = result.expectedNetKopeks - result.receivedKopeks;
     const lossKopeks = diff > BigInt(0) ? diff : BigInt(0);
@@ -121,17 +122,31 @@ export async function handleReconcile(job: Job): Promise<void> {
       loss_percent: lossPercent,
     });
 
-    console.log(`[handleReconcile] Enqueueing report export...`);
-    await enqueue('report_export', runId, { run_id: runId });
-
-    // ── УВЕДОМЛЕНИЕ (без очистки сессии) ──
+    // ── УВЕДОМЛЕНИЕ ──
     if (user?.telegram_id) {
       console.log(`[handleReconcile] Notifying user ${user.telegram_id}`);
-      const message = buildUserMessage(result) + '\n\n📄 Готовлю отчёт – он придёт в течение минуты.';
+      let message = buildUserMessage(result);
+
+      // Проверка статуса подписки – ключевой гейт activation-модели
+      if (user.subscription_status === 'ACTIVE') {
+        // Платный пользователь: ставим задачу на отчёт и информируем
+        message += '\n\n📄 Готовлю отчёт – он придёт в течение минуты.';
+        await enqueue('report_export', runId, { run_id: runId });
+      } else {
+        // Бесплатный пользователь: показываем итоги и предлагаем подписку
+        message += '\n\n🔓 Это бесплатная сверка. Полный отчёт с детализацией, неидентифицированными поступлениями и готовым шаблоном претензии доступен по подписке.';
+        message += '\nОформите подписку за 1 500 ₽/30 дней – /subscribe';
+      }
+
       await notifyUser(user.telegram_id, message);
-      console.log(`[handleReconcile] Notification sent.`);
+
+      // Завершаем активную сессию сверки
+      if (user.telegram_id) {
+        await clearSession(user.telegram_id);
+      }
+      console.log(`[handleReconcile] Notification sent and session cleared.`);
     } else {
-      console.warn(`[handleReconcile] No telegram_id for user ${run.user_id}, skipping notification.`);
+      console.warn(`[handleReconcile] No telegram_id for user ${run.user_id}, skipping notifications.`);
     }
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
