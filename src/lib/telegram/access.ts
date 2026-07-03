@@ -9,9 +9,12 @@ export const PROTECTED_COMMANDS = new Set([
   'upload_bank',
   'run_sync',
   'history',
+  'subscribe',
+  'help',
   'get_report',
   'status',
   'sync_status',
+  'delete_my_data',
   'retry_import',
   'cancel',
 ]);
