@@ -1,6 +1,6 @@
 // Access control logic for Telegram bot users.
-// Admins (TELEGRAM_ADMIN_IDS) are subject to the same paywall as regular users,
-// but they can always use administrative commands.
+// Admins (TELEGRAM_ADMIN_IDS) always have full access regardless of subscription status,
+// so they can test and administer the bot without restrictions.
 
 export type AccessLevel = 'full' | 'readonly' | 'none';
 
@@ -9,12 +9,9 @@ export const PROTECTED_COMMANDS = new Set([
   'upload_bank',
   'run_sync',
   'history',
-  'subscribe',
-  'help',
   'get_report',
   'status',
   'sync_status',
-  'delete_my_data',
   'retry_import',
   'cancel',
 ]);
@@ -34,6 +31,11 @@ export function checkAccess(user: {
   subscription_end_date: Date | null;
   telegram_id: bigint | null;
 }): AccessLevel {
+  // Admins always have full access
+  if (user.telegram_id && isAdmin(user.telegram_id)) {
+    return 'full';
+  }
+
   const now = new Date();
 
   // Active subscription
@@ -54,6 +56,6 @@ export function checkAccess(user: {
     return 'full';
   }
 
-  // Expired — read only for everyone, including admins
+  // Expired — read only for everyone else
   return 'readonly';
 }
