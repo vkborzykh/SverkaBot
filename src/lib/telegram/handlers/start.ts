@@ -11,16 +11,20 @@ export async function handleStart(ctx: Context): Promise<void> {
   const existing = await findUserByTelegramId(telegramId);
 
   if (existing) {
-    await ctx.reply(
-      msg.consentAccepted(
-        formatDate(
-          existing.trial_expires_at ??
-            existing.subscription_end_date ??
-            new Date(),
+    if (existing.subscription_status === 'EXPIRED') {
+      await ctx.reply(msg.trialExpired, mainMenuKeyboard);
+    } else {
+      await ctx.reply(
+        msg.consentAccepted(
+          formatDate(
+            existing.trial_expires_at ??
+              existing.subscription_end_date ??
+              new Date(),
+          ),
         ),
-      ),
-      mainMenuKeyboard,
-    );
+        mainMenuKeyboard,
+      );
+    }
     await ctx.reply('Нажмите кнопку ниже, чтобы начать сверку.', newReconciliationKeyboard);
     return;
   }
