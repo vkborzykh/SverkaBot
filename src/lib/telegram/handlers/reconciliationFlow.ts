@@ -3,11 +3,11 @@ import { setSession, getSessionPayload, updateSessionPayload, clearSession } fro
 import { newReconciliationKeyboard, uploadWbInlineKeyboard, wbCompletedKeyboard, bankCompletedKeyboard, reconciliationFinishedKeyboard } from '../keyboard';
 import { msg } from '../messages.ru';
 import { findUserByTelegramId } from '@/src/db/repositories/users';
+import { checkAccess } from '@/src/lib/telegram/access';
 import { enqueue } from '@/src/lib/jobs/queue';
 import { startReconciliation } from '@/src/lib/reconciliation/startRun';
 
 export async function handleNewReconciliation(ctx: Context, userId: string): Promise<void> {
-  // Новая операция: очищаем сессию и устанавливаем активное состояние с пустыми слотами
   await setSession(BigInt(ctx.from!.id), 'reconciliation_active', {});
   await ctx.reply(msg.newReconciliationPrompt, uploadWbInlineKeyboard);
 }
@@ -16,7 +16,6 @@ export async function handleUploadWbInline(ctx: Context): Promise<void> {
   await ctx.answerCbQuery();
   const telegramId = BigInt(ctx.from!.id);
   const payload = await getSessionPayload(telegramId) ?? {};
-  // Устанавливаем сессию ожидания WB-файла, сохраняя текущие слоты
   await setSession(telegramId, 'awaiting_wb_file', payload);
   await ctx.reply(msg.uploadWbPrompt);
 }
@@ -34,7 +33,6 @@ export async function handleUploadBankInline(ctx: Context): Promise<void> {
   await ctx.answerCbQuery();
   const telegramId = BigInt(ctx.from!.id);
   const payload = await getSessionPayload(telegramId) ?? {};
-  // Устанавливаем сессию ожидания банковского файла
   await setSession(telegramId, 'awaiting_bank_file', payload);
   await ctx.reply(msg.uploadBankPrompt);
 }
@@ -54,6 +52,15 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
   const user = await findUserByTelegramId(telegramId);
   if (!user) {
     await ctx.reply(msg.accessExpired);
+    return;
+  }
+
+  if (checkAccess(user) !== 'full') {
+    await ctx.reply(msg.accessExpired, {
+      reply_markup: {
+        inline_keyboard: [[{ text: '💰 Подписка', callback_data: 'subscribe_inline' }]],
+      },
+    });
     return;
   }
 
