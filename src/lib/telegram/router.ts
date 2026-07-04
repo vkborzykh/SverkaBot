@@ -327,6 +327,9 @@ export async function routeUpdate(
       case 'run_sync_inline':
         await handleRunSyncInline(ctx as any);
         break;
+      case 'subscribe_inline':
+        await handleSubscribe(ctx as any);
+        break;        
     }
   }
 }
