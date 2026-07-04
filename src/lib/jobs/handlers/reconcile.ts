@@ -6,16 +6,14 @@ import { reconcileWbPayout, type WbPayoutResult } from '@/src/lib/reconciliation
 import { enqueue } from '@/src/lib/jobs/queue';
 import { clearSession } from '@/src/lib/telegram/session';
 
-async function notifyUser(telegramId: bigint, text: string, keyboard?: any): Promise<void> {
+async function notifyUser(telegramId: bigint, text: string): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return;
   try {
-    const body: any = { chat_id: String(telegramId), text };
-    if (keyboard) body.reply_markup = keyboard;
     await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ chat_id: String(telegramId), text }),
     });
   } catch (err) {
     console.error('[notifyUser] error:', err);
@@ -96,18 +94,10 @@ export async function handleReconcile(job: Job): Promise<void> {
       const isSubActive = user.subscription_status === 'ACTIVE' && user.subscription_end_date && new Date(user.subscription_end_date) > now;
 
       if (isTrialActive || isSubActive) {
-        // Платный или активный триал — полный отчёт
         await enqueue('report_export', runId, { run_id: runId });
         await notifyUser(user.telegram_id, buildUserMessage(result) + '\n\n📄 Готовлю отчёт – он придёт в течение минуты.');
-      } else {
-        // Бесплатный — paywall с кнопкой
-        const msg = buildUserMessage(result) +
-          '\n\n🔓 Пробный период завершён. Полный отчёт с детализацией, неидентифицированными поступлениями и готовым шаблоном претензии доступен по подписке.\nОформите подписку за 1 500 ₽ на 30 дней.';
-        await notifyUser(user.telegram_id, msg, {
-          inline_keyboard: [[{ text: '💰 Подписка', callback_data: 'subscribe_inline' }]],
-        });
       }
-
+      // Если нет доступа – просто не отправляем ничего (сверка не должна была запуститься)
       await clearSession(user.telegram_id);
     }
   } catch (err) {
