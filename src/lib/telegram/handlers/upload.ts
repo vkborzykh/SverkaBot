@@ -19,10 +19,18 @@ export interface DocumentInfo {
 async function downloadTelegramFile(fileId: string): Promise<Buffer> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) throw new Error('TELEGRAM_BOT_TOKEN is not set');
-  const infoRes = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`);
+
+  const infoRes = await fetch(
+    `https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`,
+  );
   const infoJson = (await infoRes.json()) as { ok: boolean; result?: { file_path?: string } };
-  if (!infoJson.ok || !infoJson.result?.file_path) throw new Error('Failed to get file info from Telegram');
-  const fileRes = await fetch(`https://api.telegram.org/file/bot${token}/${infoJson.result.file_path}`);
+  if (!infoJson.ok || !infoJson.result?.file_path) {
+    throw new Error('Failed to get file info from Telegram');
+  }
+
+  const fileRes = await fetch(
+    `https://api.telegram.org/file/bot${token}/${infoJson.result.file_path}`,
+  );
   const arrayBuf = await fileRes.arrayBuffer();
   return Buffer.from(arrayBuf);
 }
@@ -35,12 +43,14 @@ async function handleFileUpload(
 ): Promise<void> {
   const from = ctx.from;
   if (!from) return;
+
   const telegramId = BigInt(from.id);
 
   const user = await findUserByTelegramId(telegramId);
   if (!user) { await ctx.reply(msg.accessExpired); return; }
 
   const sessionPayload = await getSessionPayload(telegramId) ?? {};
+
   const slotKey = sourceType === 'WB' ? 'wb_import_id' : 'bank_import_id';
   if (sessionPayload[slotKey]) {
     await ctx.reply(sourceType === 'WB' ? msg.wbAlreadyUploaded : msg.bankAlreadyUploaded);
@@ -63,42 +73,57 @@ async function handleFileUpload(
   }
 
   const fileHash = sha256(buffer);
-  const existing = await findImportByHash(user.id, sourceType, fileHash);
+  const existingImport = await findImportByHash(user.id, sourceType, fileHash);
 
-  // Предупреждение, но не блокируем
-  if (existing) {
+  // Если файл уже есть — используем существующий импорт, не создаём новый
+  let importId: string;
+  if (existingImport) {
+    // Предупреждение, но продолжаем
     await ctx.reply(sourceType === 'WB' ? msg.uploadDuplicateWbWarning : msg.uploadDuplicateBankWarning);
+    importId = existingImport.id;
+
+    // Если существующий импорт уже завершён или отменён, переводим в RECEIVED и перезапускаем парсинг
+    if (existingImport.status === 'COMPLETED' || existingImport.status === 'FAILED' || existingImport.status === 'CANCELLED') {
+      const { updateImport } = await import('@/src/db/repositories/imports');
+      await updateImport(importId, { status: 'RECEIVED', error_count: 0, failure_reason: null });
+      const jobType = sourceType === 'WB' ? 'parse_wb' : 'parse_bank';
+      await enqueue(jobType, importId, { import_id: importId });
+    }
+  } else {
+    // Сохраняем новый файл и создаём импорт
+    try {
+      const storagePath = await storeFile(user.id, fileHash, ext, buffer);
+      const newImport = await createImport({
+        user_id: user.id,
+        source_type: sourceType,
+        marketplace: sourceType === 'WB' ? 'WB' : null,
+        storage_path: storagePath,
+        original_filename: doc.fileName,
+        file_hash: fileHash,
+        file_size_bytes: BigInt(buffer.byteLength),
+        status: 'RECEIVED',
+      });
+      importId = newImport.id;
+
+      const jobType = sourceType === 'WB' ? 'parse_wb' : 'parse_bank';
+      await enqueue(jobType, newImport.id, { import_id: newImport.id });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      console.error('[upload] failed to store/enqueue:', err);
+      const showDetail = isAdmin(telegramId) || process.env.DEBUG_UPLOAD_ERRORS === 'true';
+      await ctx.reply(showDetail ? `${msg.uploadError}\n\n🔧 ${detail}` : msg.uploadError);
+      return;
+    }
   }
 
-  try {
-    const storagePath = await storeFile(user.id, fileHash, ext, buffer);
-    const newImport = await createImport({
-      user_id: user.id,
-      source_type: sourceType,
-      marketplace: sourceType === 'WB' ? 'WB' : null,
-      storage_path: storagePath,
-      original_filename: doc.fileName,
-      file_hash: fileHash,
-      file_size_bytes: BigInt(buffer.byteLength),
-      status: 'RECEIVED',
-    });
+  // Обновляем сессию: записываем import_id в слот
+  const updatedPayload = { ...sessionPayload, [slotKey]: importId };
+  await setSession(telegramId, 'reconciliation_active', updatedPayload);
 
-    const jobType = sourceType === 'WB' ? 'parse_wb' : 'parse_bank';
-    await enqueue(jobType, newImport.id, { import_id: newImport.id });
-
-    const updatedPayload = { ...sessionPayload, [slotKey]: newImport.id };
-    await setSession(telegramId, 'reconciliation_active', updatedPayload);
-
-    if (sourceType === 'WB') {
-      await ctx.reply(msg.uploadWbReceived);
-    } else {
-      await ctx.reply(msg.uploadBankReceived);
-    }
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    console.error('[upload] failed to store/enqueue:', err);
-    const showDetail = isAdmin(telegramId) || process.env.DEBUG_UPLOAD_ERRORS === 'true';
-    await ctx.reply(showDetail ? `${msg.uploadError}\n\n🔧 ${detail}` : msg.uploadError);
+  if (sourceType === 'WB') {
+    await ctx.reply(msg.uploadWbReceived);
+  } else {
+    await ctx.reply(msg.uploadBankReceived);
   }
 }
 
