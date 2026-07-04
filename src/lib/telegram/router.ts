@@ -48,7 +48,11 @@ export interface BotContext {
 }
 
 async function replyAccessExpired(ctx: BotContext): Promise<void> {
-  await ctx.reply(msg.accessExpired);
+  await ctx.reply(msg.accessExpired, {
+    reply_markup: {
+      inline_keyboard: [[{ text: '💰 Подписка', callback_data: 'subscribe_inline' }]],
+    },
+  });
 }
 
 export async function routeUpdate(
