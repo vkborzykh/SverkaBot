@@ -1,6 +1,6 @@
 import { createBillingTransaction, findBillingTransactionByProviderTxId } from '@/src/db/repositories/billing-transactions';
 import type { Update, User as TgUser } from 'telegraf/types';
-import { findUserByTelegramId } from '@/src/db/repositories/users';
+import { findUserByTelegramId, updateUser } from '@/src/db/repositories/users';
 import { checkAccess, PROTECTED_COMMANDS } from './access';
 import { getSession } from './session';
 import { handleStart, handleConsentAccept, handleConsentDecline } from './handlers/start';
@@ -14,7 +14,7 @@ import { handleStatus } from './handlers/status';
 import { handleGetReport } from './handlers/getReport';
 import { handleHelp } from './handlers/stubs';
 import { handleDeleteMyData, handleDeleteConfirm, handleDeleteCancel } from './handlers/deleteData';
-import { handleSubscribe } from './handlers/subscribe';
+import { handleSubscribe, handleReferral } from './handlers/subscribe';
 import { handleRetryImport } from './handlers/retryImport';
 import { handleCancel } from './handlers/cancelOp';
 import {
@@ -74,7 +74,7 @@ export async function routeUpdate(
     const telegramId = BigInt(update.message.chat.id);
 
     // Проверка суммы и валюты на сервере
-    if (sp.total_amount !== 150000 || sp.currency !== 'RUB') {
+    if (sp.total_amount !== 150000 && sp.total_amount !== 120000 || sp.currency !== 'RUB') {
       console.error('[successful_payment] Invalid amount or currency', sp.total_amount, sp.currency);
       return; // тихо игнорируем, не подтверждаем
     }
@@ -90,11 +90,31 @@ export async function routeUpdate(
 
         const { activateSubscription } = await import('@/src/lib/billing/subscription');
         const endDate = await activateSubscription(user.id, 30);
-        const formatted = endDate.toLocaleDateString('ru-RU', {
-          day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC',
-        });
 
-        const { createBillingTransaction } = await import('@/src/db/repositories/billing-transactions');
+        // Реферальный бонус: если пользователь был приглашён, начисляем +14 дней рефереру
+        let referralBonusGranted = false;
+        if (user.invited_by) {
+          const referrer = await findUserByTelegramId(user.invited_by);
+          if (referrer && referrer.subscription_status === 'ACTIVE' && referrer.subscription_end_date) {
+            const newEndDate = new Date(referrer.subscription_end_date.getTime() + 14 * 24 * 60 * 60 * 1000);
+            await updateUser(referrer.id, { subscription_end_date: newEndDate });
+            referralBonusGranted = true;
+
+            // Уведомляем реферера
+            const token = process.env.TELEGRAM_BOT_TOKEN;
+            if (token) {
+              fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  chat_id: String(user.invited_by),
+                  text: '🎉 Ваш друг оформил подписку! Вам начислено +14 дней.',
+                }),
+              }).catch(() => {});
+            }
+          }
+        }
+
         await createBillingTransaction({
           user_id: user.id,
           amount_kopeks: BigInt(sp.total_amount),
@@ -103,8 +123,12 @@ export async function routeUpdate(
           provider: 'telegram',
           provider_tx_id: sp.telegram_payment_charge_id,
           confirmation_url: null,
+          referral_bonus_granted: referralBonusGranted,
         });
 
+        const formatted = endDate.toLocaleDateString('ru-RU', {
+          day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC',
+        });
         await ctx.reply(`Оплата прошла успешно! Ваша подписка активна до ${formatted}. Спасибо!`);
       }
     } catch (err) {
@@ -226,8 +250,10 @@ export async function routeUpdate(
         await handleNewReconciliation(ctx as Parameters<typeof handleNewReconciliation>[0], user.id);
         break;
       case 'subscribe':
-        // Передаём контекст как Telegraf Context (он имеет replyWithInvoice)
         await handleSubscribe(ctx as any);
+        break;
+      case 'referral':
+        await handleReferral(ctx as any);
         break;
       case 'help':
         await handleHelp(ctx as Parameters<typeof handleHelp>[0]);
