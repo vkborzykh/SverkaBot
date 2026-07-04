@@ -7,12 +7,32 @@ import { checkAccess } from '@/src/lib/telegram/access';
 import { enqueue } from '@/src/lib/jobs/queue';
 import { startReconciliation } from '@/src/lib/reconciliation/startRun';
 
+function paywallReply(ctx: Context, text: string) {
+  return ctx.reply(text, {
+    reply_markup: {
+      inline_keyboard: [[{ text: '💰 Подписка', callback_data: 'subscribe_inline' }]],
+    },
+  });
+}
+
 export async function handleNewReconciliation(ctx: Context, userId: string): Promise<void> {
+  // Проверка доступа
+  const user = await findUserByTelegramId(BigInt(ctx.from!.id));
+  if (!user || checkAccess(user) !== 'full') {
+    await paywallReply(ctx, msg.accessExpired);
+    return;
+  }
   await setSession(BigInt(ctx.from!.id), 'reconciliation_active', {});
   await ctx.reply(msg.newReconciliationPrompt, uploadWbInlineKeyboard);
 }
 
 export async function handleUploadWbInline(ctx: Context): Promise<void> {
+  // Проверка доступа
+  const user = await findUserByTelegramId(BigInt(ctx.from!.id));
+  if (!user || checkAccess(user) !== 'full') {
+    await paywallReply(ctx, msg.accessExpired);
+    return;
+  }
   await ctx.answerCbQuery();
   const telegramId = BigInt(ctx.from!.id);
   const payload = await getSessionPayload(telegramId) ?? {};
@@ -21,6 +41,11 @@ export async function handleUploadWbInline(ctx: Context): Promise<void> {
 }
 
 export async function handleReplaceWb(ctx: Context): Promise<void> {
+  const user = await findUserByTelegramId(BigInt(ctx.from!.id));
+  if (!user || checkAccess(user) !== 'full') {
+    await paywallReply(ctx, msg.accessExpired);
+    return;
+  }
   await ctx.answerCbQuery();
   const telegramId = BigInt(ctx.from!.id);
   const payload = await getSessionPayload(telegramId) ?? {};
@@ -30,6 +55,11 @@ export async function handleReplaceWb(ctx: Context): Promise<void> {
 }
 
 export async function handleUploadBankInline(ctx: Context): Promise<void> {
+  const user = await findUserByTelegramId(BigInt(ctx.from!.id));
+  if (!user || checkAccess(user) !== 'full') {
+    await paywallReply(ctx, msg.accessExpired);
+    return;
+  }
   await ctx.answerCbQuery();
   const telegramId = BigInt(ctx.from!.id);
   const payload = await getSessionPayload(telegramId) ?? {};
@@ -38,6 +68,11 @@ export async function handleUploadBankInline(ctx: Context): Promise<void> {
 }
 
 export async function handleReplaceBank(ctx: Context): Promise<void> {
+  const user = await findUserByTelegramId(BigInt(ctx.from!.id));
+  if (!user || checkAccess(user) !== 'full') {
+    await paywallReply(ctx, msg.accessExpired);
+    return;
+  }
   await ctx.answerCbQuery();
   const telegramId = BigInt(ctx.from!.id);
   const payload = await getSessionPayload(telegramId) ?? {};
@@ -47,23 +82,13 @@ export async function handleReplaceBank(ctx: Context): Promise<void> {
 }
 
 export async function handleRunSyncInline(ctx: Context): Promise<void> {
+  const user = await findUserByTelegramId(BigInt(ctx.from!.id));
+  if (!user || checkAccess(user) !== 'full') {
+    await paywallReply(ctx, msg.accessExpired);
+    return;
+  }
   await ctx.answerCbQuery();
   const telegramId = BigInt(ctx.from!.id);
-  const user = await findUserByTelegramId(telegramId);
-  if (!user) {
-    await ctx.reply(msg.accessExpired);
-    return;
-  }
-
-  if (checkAccess(user) !== 'full') {
-    await ctx.reply(msg.accessExpired, {
-      reply_markup: {
-        inline_keyboard: [[{ text: '💰 Подписка', callback_data: 'subscribe_inline' }]],
-      },
-    });
-    return;
-  }
-
   const payload = await getSessionPayload(telegramId) ?? {};
   const wbImportId = payload.wb_import_id as string | undefined;
   const bankImportId = payload.bank_import_id as string | undefined;
