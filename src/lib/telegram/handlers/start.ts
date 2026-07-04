@@ -8,6 +8,11 @@ import { msg } from '../messages.ru';
 
 export async function handleStart(ctx: Context): Promise<void> {
   const telegramId = BigInt(ctx.from!.id);
+
+  // Извлекаем реферальный код из deep-link: /start ref123456
+  const text = (ctx.message && 'text' in ctx.message ? ctx.message.text : '') ?? '';
+  const refId = text.startsWith('/start ') ? text.slice(7).trim() : null;
+
   const existing = await findUserByTelegramId(telegramId);
 
   if (existing) {
@@ -29,7 +34,14 @@ export async function handleStart(ctx: Context): Promise<void> {
     return;
   }
 
+  // Новый пользователь — сохраняем refId в payload сессии, чтобы записать после согласия
   await ctx.reply(msg.welcome, consentKeyboard);
+
+  // Сохраняем refId во временных данных (используем session)
+  if (refId) {
+    const { setSession } = await import('@/src/lib/telegram/session');
+    await setSession(telegramId, 'awaiting_consent', { ref: refId });
+  }
 }
 
 export async function handleConsentAccept(ctx: Context): Promise<void> {
@@ -73,6 +85,11 @@ export async function handleConsentAccept(ctx: Context): Promise<void> {
     return;
   }
 
+  // Первичный триал — проверяем наличие ref
+  const { getSession, clearSession } = await import('@/src/lib/telegram/session');
+  const sessionData = await getSession(telegramId) as any;
+  const refId = sessionData?.ref;
+
   const trialExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
   const user = await createUser({
@@ -81,13 +98,14 @@ export async function handleConsentAccept(ctx: Context): Promise<void> {
     subscription_status: 'TRIAL',
     trial_expires_at: trialExpiresAt,
     has_used_trial: true,
+    invited_by: refId ? BigInt(refId) : null,
     consent_given_at: new Date(),
   });
 
   await markTrialUsed(telegramId);
+  if (sessionData) await clearSession(telegramId);
 
   await createConsent({ user_id: user.id, consent_version: '1.0', accepted_at: new Date() });
-
   await logAuditEvent(user.id, 'consent_accepted');
   await logAuditEvent(user.id, 'trial_started', { trial_expires_at: trialExpiresAt.toISOString() });
 
