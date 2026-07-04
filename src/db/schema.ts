@@ -45,6 +45,7 @@ export const users = pgTable(
       withTimezone: true,
     }),
     has_used_trial: boolean('has_used_trial').notNull().default(false),
+    invited_by: bigint('invited_by', { mode: 'bigint' }),
     last_update_id: bigint('last_update_id', { mode: 'bigint' }),
     created_at: timestamp('created_at', { withTimezone: true })
       .defaultNow()
@@ -467,6 +468,7 @@ export const billing_transactions = pgTable(
     provider: text('provider'),
     provider_tx_id: text('provider_tx_id'),
     confirmation_url: text('confirmation_url'),
+    referral_bonus_granted: boolean('referral_bonus_granted').default(false),
     created_at: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
