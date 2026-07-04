@@ -1,3 +1,4 @@
+import { checkAccess } from '@/src/lib/telegram/access';
 import { validateFileSize, validateExtension, MAX_FILE_BYTES } from '@/src/lib/ingestion/validate';
 import { sha256 } from '@/src/lib/ingestion/hash';
 import { storeFile } from '@/src/lib/ingestion/storage';
@@ -47,6 +48,14 @@ async function handleFileUpload(
   const telegramId = BigInt(from.id);
 
   const user = await findUserByTelegramId(telegramId);
+  if (checkAccess(user) !== 'full') {
+    await ctx.reply(msg.accessExpired, {
+      reply_markup: {
+        inline_keyboard: [[{ text: '💰 Подписка', callback_data: 'subscribe_inline' }]],
+      },
+    });
+    return;
+  }
   if (!user) { await ctx.reply(msg.accessExpired); return; }
 
   const sessionPayload = await getSessionPayload(telegramId) ?? {};
