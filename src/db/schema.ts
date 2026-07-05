@@ -47,7 +47,7 @@ export const users = pgTable(
     has_used_trial: boolean('has_used_trial').notNull().default(false),
     invited_by: bigint('invited_by', { mode: 'bigint' }),
     tariff: text('tariff').default('START'),
-    monthly_reconciliations: integer('monthly_reconciliations').default(0),    
+    monthly_reconciliations: integer('monthly_reconciliations').default(0),
     last_update_id: bigint('last_update_id', { mode: 'bigint' }),
     created_at: timestamp('created_at', { withTimezone: true })
       .defaultNow()
@@ -62,6 +62,7 @@ export const users = pgTable(
     index('users_subscription_status_idx').on(t.subscription_status),
     index('users_subscription_end_date_idx').on(t.subscription_end_date),
     index('users_has_used_trial_idx').on(t.has_used_trial),
+    index('users_invited_by_idx').on(t.invited_by),
     check(
       'users_end_date_check',
       sql`subscription_end_date IS NULL OR subscription_end_date >= created_at`,
@@ -88,14 +89,14 @@ export const consents = pgTable(
   (t) => [index('consents_user_id_idx').on(t.user_id)],
 );
 
-// ── trial_usage (trial abuse prevention) ─────────────────────────────────────
+// ── trial_usage ──────────────────────────────────────────────────────────────
 
 export const trial_usage = pgTable('trial_usage', {
   telegram_id: bigint('telegram_id', { mode: 'bigint' }).primaryKey(),
   used_at: timestamp('used_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
-// ── admin_notifications (worker alerts) ──────────────────────────────────────
+// ── admin_notifications ──────────────────────────────────────────────────────
 
 export const admin_notifications = pgTable(
   'admin_notifications',
@@ -108,6 +109,33 @@ export const admin_notifications = pgTable(
     created_at: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [index('admin_notifications_resolved_idx').on(t.resolved)],
+);
+
+// ── wb_cabinets ──────────────────────────────────────────────────────────────
+
+export const wb_cabinets = pgTable(
+  'wb_cabinets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    user_id: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    name: text('name').notNull(),
+    created_at: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updated_at: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    deleted_at: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('wb_cabinets_user_id_idx').on(t.user_id),
+    uniqueIndex('wb_cabinets_user_name_unique_idx')
+      .on(t.user_id, t.name)
+      .where(sql`${t.deleted_at} IS NULL`),
+    check('wb_cabinets_name_length_check', sql`char_length(name) BETWEEN 1 AND 64`),
+  ],
 );
 
 // ── statement_profiles ────────────────────────────────────────────────────────
@@ -163,6 +191,9 @@ export const imports = pgTable(
       .references(() => users.id, { onDelete: 'restrict' }),
     source_type: importSourceEnum('source_type'),
     marketplace: marketplaceEnum('marketplace'),
+    cabinet_id: uuid('cabinet_id').references(() => wb_cabinets.id, {
+      onDelete: 'set null',
+    }),
     storage_path: text('storage_path'),
     original_filename: text('original_filename'),
     file_hash: text('file_hash'),
@@ -202,6 +233,7 @@ export const imports = pgTable(
     index('imports_created_at_idx').on(t.created_at),
     index('imports_file_hash_idx').on(t.file_hash),
     index('imports_marketplace_idx').on(t.marketplace),
+    index('imports_cabinet_id_idx').on(t.cabinet_id),
     uniqueIndex('imports_dedup_unique_idx')
       .on(t.user_id, t.source_type, t.file_hash)
       .where(sql`${t.deleted_at} IS NULL`),
