@@ -33,7 +33,14 @@ import {
   handleUploadBankInline,
   handleReplaceBank,
   handleRunSyncInline,
+  handleCabinetPick,
 } from './handlers/reconciliationFlow';
+import {
+  handleMyCabinets,
+  handleCabinetAdd,
+  handleCabinetDelete,
+  handleCabinetNameReceived,
+} from './handlers/myCabinets';
 import { TARIFF_BY_AMOUNT_KOPEKS } from '@/src/lib/billing/tariffs';
 import { msg } from './messages.ru';
 
@@ -144,7 +151,7 @@ export async function routeUpdate(
       await ctx.reply('Произошла ошибка при активации подписки. Пожалуйста, обратитесь в поддержку.');
     }
     return;
-}
+  }
 
   if ('message' in update && update.message) {
     const message = update.message;
@@ -189,6 +196,13 @@ export async function routeUpdate(
       [msg.menuHistory]: 'history',
       [msg.menuDeleteData]: 'delete_my_data',
     };
+
+    // ➕ cabinet: пользователь вводит название нового кабинета.
+    // Команды и кнопки меню имеют приоритет — ими можно «выйти» из ввода.
+    if (sessionState === 'awaiting_cabinet_name' && !text.startsWith('/') && !commandMap[text]) {
+      await handleCabinetNameReceived(ctx as any, text);
+      return;
+    }
 
     let command = '';
     if (text.startsWith('/')) {
@@ -263,6 +277,9 @@ export async function routeUpdate(
       case 'referral':
         await handleReferral(ctx as any);
         break;
+      case 'my_cabinets': // ➕ cabinet
+        await handleMyCabinets(ctx as any);
+        break;
       case 'help':
         await handleHelp(ctx as Parameters<typeof handleHelp>[0]);
         break;
@@ -302,7 +319,32 @@ export async function routeUpdate(
     const data = 'data' in cbq ? cbq.data : undefined;
     if (!data) return;
 
+    // ➕ cabinet: callback'и с параметром обрабатываем до switch
+    if (data.startsWith('cabinet_del:')) {
+      await handleCabinetDelete(ctx as any, data.slice('cabinet_del:'.length));
+      return;
+    }
+    if (data.startsWith('cabinet_pick:')) {
+      await handleCabinetPick(ctx as any, data.slice('cabinet_pick:'.length));
+      return;
+    }
+
     switch (data) {
+      case 'cabinet_add': // ➕ cabinet
+        await handleCabinetAdd(ctx as any);
+        break;
+      case 'my_cabinets': // ➕ cabinet
+        await handleMyCabinets(ctx as any);
+        break;
+      case 'tariff_start':
+        await import('./handlers/subscribe').then(m => m.handleTariffStart(ctx as any));
+        break;
+      case 'tariff_pro':
+        await import('./handlers/subscribe').then(m => m.handleTariffPro(ctx as any));
+        break;
+      case 'tariff_business':
+        await import('./handlers/subscribe').then(m => m.handleTariffBusiness(ctx as any));
+        break;
       case 'consent:accept':
         await handleConsentAccept(ctx as Parameters<typeof handleConsentAccept>[0]);
         break;
@@ -337,15 +379,6 @@ export async function routeUpdate(
         break;
       case 'subscribe_inline':
         await handleSubscribe(ctx as any);
-        break;
-      case 'tariff_start':
-        await handleTariffStart(ctx as any);
-        break;
-      case 'tariff_pro':
-        await handleTariffPro(ctx as any);
-        break;
-      case 'tariff_business':
-        await handleTariffBusiness(ctx as any);
         break;
     }
   }
