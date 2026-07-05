@@ -85,9 +85,8 @@ export async function routeUpdate(
     const sp = update.message.successful_payment;
     const telegramId = BigInt(update.message.chat.id);
 
-    // Принимаем суммы всех тарифов + скидку (120 000 для рефералов)
     const tariff = TARIFF_BY_AMOUNT_KOPEKS[sp.total_amount];
-    const isValidAmount = tariff || sp.total_amount === 120000; // реферальная скидка 1 200 ₽
+    const isValidAmount = tariff || sp.total_amount === 120000;
     if (!isValidAmount || sp.currency !== 'RUB') {
       console.error('[successful_payment] Invalid amount or currency', sp.total_amount, sp.currency);
       return;
@@ -102,12 +101,10 @@ export async function routeUpdate(
         const { activateSubscription } = await import('@/src/lib/billing/subscription');
         const endDate = await activateSubscription(user.id, 30);
 
-        // Сохраняем тариф и сбрасываем счётчик сверок
         if (tariff) {
           await updateUser(user.id, { tariff, monthly_reconciliations: 0 });
         }
 
-        // Реферальный бонус
         let referralBonusGranted = false;
         if (user.invited_by) {
           const referrer = await findUserByTelegramId(user.invited_by);
@@ -192,13 +189,12 @@ export async function routeUpdate(
     const commandMap: Record<string, string> = {
       [msg.menuNewReconciliation]: 'new_reconciliation',
       [msg.menuSubscribe]: 'subscribe',
+      [msg.menuMyCabinets]: 'my_cabinets',
       [msg.menuHelp]: 'help',
       [msg.menuHistory]: 'history',
       [msg.menuDeleteData]: 'delete_my_data',
     };
 
-    // ➕ cabinet: пользователь вводит название нового кабинета.
-    // Команды и кнопки меню имеют приоритет — ими можно «выйти» из ввода.
     if (sessionState === 'awaiting_cabinet_name' && !text.startsWith('/') && !commandMap[text]) {
       await handleCabinetNameReceived(ctx as any, text);
       return;
@@ -277,7 +273,7 @@ export async function routeUpdate(
       case 'referral':
         await handleReferral(ctx as any);
         break;
-      case 'my_cabinets': // ➕ cabinet
+      case 'my_cabinets':
         await handleMyCabinets(ctx as any);
         break;
       case 'help':
@@ -319,7 +315,6 @@ export async function routeUpdate(
     const data = 'data' in cbq ? cbq.data : undefined;
     if (!data) return;
 
-    // ➕ cabinet: callback'и с параметром обрабатываем до switch
     if (data.startsWith('cabinet_del:')) {
       await handleCabinetDelete(ctx as any, data.slice('cabinet_del:'.length));
       return;
@@ -330,10 +325,10 @@ export async function routeUpdate(
     }
 
     switch (data) {
-      case 'cabinet_add': // ➕ cabinet
+      case 'cabinet_add':
         await handleCabinetAdd(ctx as any);
         break;
-      case 'my_cabinets': // ➕ cabinet
+      case 'my_cabinets':
         await handleMyCabinets(ctx as any);
         break;
       case 'tariff_start':
