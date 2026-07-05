@@ -13,6 +13,7 @@ import { buildHtmlReport, type ClaimRow, type ReportTxRow } from '@/src/lib/repo
 import { clearSession } from '@/src/lib/telegram/session';
 import { msg } from '@/src/lib/telegram/messages.ru';
 import { reconciliationFinishedKeyboard } from '@/src/lib/telegram/keyboard';
+import { reportRetentionDaysFor } from '@/src/lib/billing/tariffs';
 
 const MAX_REPORT_ROWS = 500;
 
@@ -53,7 +54,7 @@ export async function handleReportExport(job: Job): Promise<void> {
 
   const user = await findUserById(run.user_id);
 
-  // ➕ cabinet: название кабинета для шапки отчёта (best-effort)
+  // cabinet name
   let cabinetName: string | null = null;
   try {
     const wbImport = await findImportById(run.wb_import_id);
@@ -71,7 +72,6 @@ export async function handleReportExport(job: Job): Promise<void> {
     findMatchesByRunId(runId),
   ]);
 
-  // ── Aggregate financials ──
   let grossPayoutKopeks = BigInt(0);
   let commissionsKopeks = BigInt(0);
   let expectedKopeks = BigInt(0);
@@ -102,7 +102,6 @@ export async function handleReportExport(job: Job): Promise<void> {
       : null;
   const matchRate = run.match_rate ? Number(run.match_rate) : aggStatus === 'reconciled' || aggStatus === 'overpaid' ? 100 : 0;
 
-  // ── Helpers ──
   const fmtDmy = (d: Date | string | null | undefined): string => {
     if (!d) return '';
     const dt = new Date(d);
@@ -169,7 +168,19 @@ export async function handleReportExport(job: Job): Promise<void> {
 
   const htmlBuffer = Buffer.from(htmlReport, 'utf-8');
   const storagePath = await storeReport(runId, htmlBuffer, 'text/html');
-  await createReport({ run_id: runId, storage_path: storagePath, export_type: 'HTML', report_version: 1, is_primary: true });
+
+  const retentionDays = user?.tariff
+    ? reportRetentionDaysFor(user.tariff)
+    : 90; // fallback для TRIAL и неизвестного тарифа
+
+  await createReport({
+    run_id: runId,
+    storage_path: storagePath,
+    export_type: 'HTML',
+    report_version: 1,
+    is_primary: true,
+    retention_days: retentionDays,
+  });
 
   if (process.env.PUBLIC_URL && process.env.INTERNAL_TOKEN) {
     try {
