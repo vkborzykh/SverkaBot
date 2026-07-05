@@ -22,6 +22,7 @@ export interface ReportTxRow {
 export interface HtmlReportData {
   runId: string;
   dateStr: string;
+  cabinetName?: string | null;  
   status: 'reconciled' | 'underpaid' | 'missing' | 'overpaid';
   grossPayoutKopeks: bigint;
   commissionsKopeks: bigint;
@@ -330,7 +331,7 @@ export function buildHtmlReport(data: HtmlReportData): string {
   <div class="wrap"><div class="card">
     <div class="head">
       <h1>Отчёт по сверке выплат Wildberries</h1>
-      <span class="run">Сверка ${esc(data.runId.slice(0, 8))} · ${esc(data.dateStr)}</span>
+      <span class="run">Сверка ${esc(data.runId.slice(0, 8))} · ${esc(data.dateStr)}${data.cabinetName ? ` · 🗂 ${esc(data.cabinetName)}` : ''}</span>
     </div>
 
     <div class="banner"><b>${meta.label}</b><div class="note">${meta.note}</div></div>
