@@ -299,6 +299,15 @@ export async function routeUpdate(
     if (!data) return;
 
     switch (data) {
+      case 'tariff_start':
+        await import('./handlers/subscribe').then(m => m.handleTariffStart(ctx as any));
+        break;
+      case 'tariff_pro':
+        await import('./handlers/subscribe').then(m => m.handleTariffPro(ctx as any));
+        break;
+      case 'tariff_business':
+        await import('./handlers/subscribe').then(m => m.handleTariffBusiness(ctx as any));
+        break;        
       case 'consent:accept':
         await handleConsentAccept(ctx as Parameters<typeof handleConsentAccept>[0]);
         break;
