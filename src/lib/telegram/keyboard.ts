@@ -24,8 +24,9 @@ export const mainMenuKeyboard = {
   reply_markup: {
     keyboard: [
       [msg.menuNewReconciliation],
-      [msg.menuSubscribe, msg.menuHelp],
-      [msg.menuHistory, msg.menuDeleteData],
+      [msg.menuSubscribe, msg.menuMyCabinets],
+      [msg.menuHelp, msg.menuHistory],
+      [msg.menuDeleteData],
     ],
     resize_keyboard: true,
   },
@@ -71,22 +72,6 @@ export const reconciliationFinishedKeyboard = {
   reply_markup: {
     inline_keyboard: [
       [{ text: '🆕 Начать новую сверку', callback_data: 'new_reconciliation' }],
-    ],
-  },
-};
-
-export const replaceWbInlineKeyboard = {
-  reply_markup: {
-    inline_keyboard: [
-      [{ text: '🔄 Заменить WB отчёт', callback_data: 'replace_wb' }],
-    ],
-  },
-};
-
-export const replaceBankInlineKeyboard = {
-  reply_markup: {
-    inline_keyboard: [
-      [{ text: '🔄 Заменить выписку', callback_data: 'replace_bank' }],
     ],
   },
 };
