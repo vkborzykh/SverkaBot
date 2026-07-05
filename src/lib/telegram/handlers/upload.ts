@@ -20,7 +20,6 @@ export interface DocumentInfo {
 async function downloadTelegramFile(fileId: string): Promise<Buffer> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) throw new Error('TELEGRAM_BOT_TOKEN is not set');
-
   const infoRes = await fetch(
     `https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`,
   );
@@ -28,7 +27,6 @@ async function downloadTelegramFile(fileId: string): Promise<Buffer> {
   if (!infoJson.ok || !infoJson.result?.file_path) {
     throw new Error('Failed to get file info from Telegram');
   }
-
   const fileRes = await fetch(
     `https://api.telegram.org/file/bot${token}/${infoJson.result.file_path}`,
   );
@@ -44,9 +42,7 @@ async function handleFileUpload(
 ): Promise<void> {
   const from = ctx.from;
   if (!from) return;
-
   const telegramId = BigInt(from.id);
-
   const user = await findUserByTelegramId(telegramId);
   if (checkAccess(user) !== 'full') {
     await ctx.reply(msg.accessExpired, {
@@ -59,12 +55,15 @@ async function handleFileUpload(
   if (!user) { await ctx.reply(msg.accessExpired); return; }
 
   const sessionPayload = await getSessionPayload(telegramId) ?? {};
-
   const slotKey = sourceType === 'WB' ? 'wb_import_id' : 'bank_import_id';
   if (sessionPayload[slotKey]) {
     await ctx.reply(sourceType === 'WB' ? msg.wbAlreadyUploaded : msg.bankAlreadyUploaded);
     return;
   }
+
+  // ➕ cabinet: выбранный на старте сверки кабинет (может отсутствовать → NULL)
+  const cabinetId =
+    typeof sessionPayload.cabinet_id === 'string' ? sessionPayload.cabinet_id : null;
 
   if (!validateExtension(doc.fileName, allowedExtensions)) { await ctx.reply(msg.errInvalidFormat); return; }
   if (!validateFileSize(doc.fileSizeBytes)) { await ctx.reply(msg.errFileTooLarge); return; }
@@ -74,7 +73,6 @@ async function handleFileUpload(
   if (!validateFileSize(buffer.byteLength)) { await ctx.reply(msg.errFileTooLarge); return; }
 
   const ext = doc.fileName.toLowerCase().endsWith('.csv') ? 'csv' : 'xlsx';
-
   const contentCheck = await validateFileContent(buffer, ext, sourceType);
   if (!contentCheck.valid) {
     await ctx.reply(contentCheck.reason!);
@@ -90,10 +88,13 @@ async function handleFileUpload(
     // Предупреждение, но продолжаем
     await ctx.reply(sourceType === 'WB' ? msg.uploadDuplicateWbWarning : msg.uploadDuplicateBankWarning);
     importId = existingImport.id;
-
+    const { updateImport } = await import('@/src/db/repositories/imports');
+    // ➕ cabinet: привязываем существующий импорт к кабинету текущей сессии
+    if (cabinetId && existingImport.cabinet_id !== cabinetId) {
+      await updateImport(importId, { cabinet_id: cabinetId });
+    }
     // Если существующий импорт уже завершён или отменён, переводим в RECEIVED и перезапускаем парсинг
     if (existingImport.status === 'COMPLETED' || existingImport.status === 'FAILED' || existingImport.status === 'CANCELLED') {
-      const { updateImport } = await import('@/src/db/repositories/imports');
       await updateImport(importId, { status: 'RECEIVED', error_count: 0, failure_reason: null });
       const jobType = sourceType === 'WB' ? 'parse_wb' : 'parse_bank';
       await enqueue(jobType, importId, { import_id: importId });
@@ -106,6 +107,7 @@ async function handleFileUpload(
         user_id: user.id,
         source_type: sourceType,
         marketplace: sourceType === 'WB' ? 'WB' : null,
+        cabinet_id: cabinetId, // ➕ cabinet (NULL, если кабинет не выбран)
         storage_path: storagePath,
         original_filename: doc.fileName,
         file_hash: fileHash,
@@ -113,7 +115,6 @@ async function handleFileUpload(
         status: 'RECEIVED',
       });
       importId = newImport.id;
-
       const jobType = sourceType === 'WB' ? 'parse_wb' : 'parse_bank';
       await enqueue(jobType, newImport.id, { import_id: newImport.id });
     } catch (err) {
