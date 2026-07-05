@@ -1,5 +1,5 @@
 import type { Context } from 'telegraf';
-import { findUserByTelegramId, updateUser } from '@/src/db/repositories/users';
+import { findUserByTelegramId, updateUser, findUsersByInvitedBy } from '@/src/db/repositories/users';
 import { msg } from '../messages.ru';
 
 const TARIFFS = {
@@ -88,7 +88,6 @@ export async function handleReferral(ctx: Context): Promise<void> {
   }
 
   const link = `https://t.me/SverkaProBot?start=ref${BigInt(from.id)}`;
-  const { findUsersByInvitedBy } = await import('@/src/db/repositories/users');
   const invitedUsers = await findUsersByInvitedBy(BigInt(from.id));
 
   await ctx.reply([
