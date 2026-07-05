@@ -1,13 +1,12 @@
 import type { Context } from 'telegraf';
-import { findUserByTelegramId, findUsersByInvitedBy } from '@/src/db/repositories/users';
+import { findUserByTelegramId, updateUser } from '@/src/db/repositories/users';
 import { msg } from '../messages.ru';
 
-const FULL_PRICE_KOPEKS = 150000;   // 1 500 ₽
-const DISCOUNT_PRICE_KOPEKS = 120000; // 1 200 ₽ (20% скидка)
-
-function referralLink(tgId: bigint): string {
-  return `https://t.me/SverkaProBot?start=ref${tgId}`;
-}
+const TARIFFS = {
+  START: { priceKopeks: 99000, label: '🚀 Старт', desc: '30 дней, до 4 сверок в месяц' },
+  PRO: { priceKopeks: 199000, label: '⚡ Профи', desc: '30 дней, безлимит, Google Sheets, Динамика, приоритет' },
+  BUSINESS: { priceKopeks: 499000, label: '🏢 Бизнес', desc: '30 дней, до 5 кабинетов, CSV, хранение 365 дней' },
+};
 
 export async function handleSubscribe(ctx: Context): Promise<void> {
   const from = ctx.from;
@@ -19,40 +18,63 @@ export async function handleSubscribe(ctx: Context): Promise<void> {
     return;
   }
 
-  // Проверяем, первая ли это оплата (нет ни одной успешной транзакции) и приглашён ли пользователь
-  const { findBillingTransactionsByUserId } = await import('@/src/db/repositories/billing-transactions');
-  const txs = await findBillingTransactionsByUserId(user.id);
-  const hasPaidBefore = txs.some((tx) => tx.status === 'SUCCESS');
-  const isInvited = !!user.invited_by && !hasPaidBefore;
+  await ctx.reply('Выберите тариф:', {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: `${TARIFFS.START.label} — 990 ₽/мес (4 сверки)`, callback_data: 'tariff_start' }],
+        [{ text: `${TARIFFS.PRO.label} — 1 990 ₽/мес (безлимит)`, callback_data: 'tariff_pro' }],
+        [{ text: `${TARIFFS.BUSINESS.label} — 4 990 ₽/мес (до 5 кабинетов)`, callback_data: 'tariff_business' }],
+      ],
+    },
+  });
+}
 
-  const amountKopeks = isInvited ? DISCOUNT_PRICE_KOPEKS : FULL_PRICE_KOPEKS;
-  const description = isInvited
-    ? '30 дней полного доступа к сверке выплат Wildberries (скидка 20% за приглашение)'
-    : '30 дней полного доступа к сверке выплат Wildberries';
-
+async function sendInvoice(ctx: Context, userId: string, tariffKey: keyof typeof TARIFFS) {
+  const t = TARIFFS[tariffKey];
   await ctx.replyWithInvoice({
-    title: 'Подписка SverkaBot',
-    description,
-    payload: `sub_${user.id}_${Date.now()}`,
+    title: `Подписка SverkaBot — ${t.label}`,
+    description: t.desc,
+    payload: `sub_${userId}_${tariffKey}_${Date.now()}`,
     provider_token: process.env.TELEGRAM_PROVIDER_TOKEN!,
     currency: 'RUB',
-    prices: [{ label: isInvited ? 'Подписка на 30 дней (скидка 20%)' : 'Подписка на 30 дней', amount: amountKopeks }],
+    prices: [{ label: t.label, amount: t.priceKopeks }],
     need_email: true,
     send_email_to_provider: true,
     provider_data: {
       receipt: {
         items: [{
-          description: 'Подписка SverkaBot 30 дней',
+          description: `Подписка SverkaBot ${t.label}`,
           quantity: '1.00',
-          amount: {
-            value: isInvited ? '1200.00' : '1500.00',
-            currency: 'RUB',
-          },
+          amount: { value: (t.priceKopeks / 100).toFixed(2), currency: 'RUB' },
           vat_code: 1,
         }],
       },
     },
   });
+}
+
+export async function handleTariffStart(ctx: Context): Promise<void> {
+  await ctx.answerCbQuery();
+  const user = await findUserByTelegramId(BigInt(ctx.from!.id));
+  if (!user) return;
+  await updateUser(user.id, { tariff: 'START' });
+  await sendInvoice(ctx, user.id, 'START');
+}
+
+export async function handleTariffPro(ctx: Context): Promise<void> {
+  await ctx.answerCbQuery();
+  const user = await findUserByTelegramId(BigInt(ctx.from!.id));
+  if (!user) return;
+  await updateUser(user.id, { tariff: 'PRO' });
+  await sendInvoice(ctx, user.id, 'PRO');
+}
+
+export async function handleTariffBusiness(ctx: Context): Promise<void> {
+  await ctx.answerCbQuery();
+  const user = await findUserByTelegramId(BigInt(ctx.from!.id));
+  if (!user) return;
+  await updateUser(user.id, { tariff: 'BUSINESS' });
+  await sendInvoice(ctx, user.id, 'BUSINESS');
 }
 
 export async function handleReferral(ctx: Context): Promise<void> {
@@ -65,17 +87,16 @@ export async function handleReferral(ctx: Context): Promise<void> {
     return;
   }
 
-  const link = referralLink(BigInt(from.id));
+  const link = `https://t.me/SverkaProBot?start=ref${BigInt(from.id)}`;
+  const { findUsersByInvitedBy } = await import('@/src/db/repositories/users');
   const invitedUsers = await findUsersByInvitedBy(BigInt(from.id));
 
-  const message = [
+  await ctx.reply([
     `🔗 Ваша реферальная ссылка:\n${link}`,
     '',
     `👥 Приглашено пользователей: ${invitedUsers.length}`,
     '',
     'За каждого друга, оплатившего подписку, вы получите +14 дней к своей подписке.',
     'Друзья получают скидку 20% на первый месяц.',
-  ].join('\n');
-
-  await ctx.reply(message);
+  ].join('\n'));
 }
