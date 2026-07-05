@@ -41,3 +41,7 @@ export function reportRetentionDaysFor(tariff: string | null | undefined): numbe
   if (hasProFeatures(tariff)) return 180;
   return 90;
 }
+
+export function cabinetLimitFor(tariff: string | null | undefined): number {
+  return hasBusinessFeatures(tariff) ? 5 : 1;
+}
