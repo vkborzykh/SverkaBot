@@ -48,6 +48,7 @@ export const users = pgTable(
     invited_by: bigint('invited_by', { mode: 'bigint' }),
     tariff: text('tariff').default('START'),
     monthly_reconciliations: integer('monthly_reconciliations').default(0),
+    current_cabinet_id: uuid('current_cabinet_id').references(() => wb_cabinets.id, { onDelete: 'set null' }),
     last_update_id: bigint('last_update_id', { mode: 'bigint' }),
     created_at: timestamp('created_at', { withTimezone: true })
       .defaultNow()
