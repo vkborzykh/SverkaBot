@@ -111,3 +111,12 @@ export async function findActiveUsersWithTelegramId(): Promise<User[]> {
       ),
     );
 }
+
+/** Найти пользователей, приглашённых конкретным пользователем (по invited_by) */
+export async function findUsersByInvitedBy(invitedBy: bigint): Promise<User[]> {
+  const db = getDb();
+  return db
+    .select()
+    .from(users)
+    .where(eq(users.invited_by, invitedBy));
+}
