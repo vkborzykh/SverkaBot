@@ -15,23 +15,23 @@ export async function handleStart(ctx: Context): Promise<void> {
   const existing = await findUserByTelegramId(telegramId);
 
   if (existing) {
-    if (existing.subscription_status === 'EXPIRED') {
-      await ctx.reply(msg.accessExpired, {
-        reply_markup: {
-          inline_keyboard: [[{ text: '💰 Подписка', callback_data: 'subscribe_inline' }]],
-        },
-      });
-    } else {
+    if (existing.subscription_status === 'ACTIVE') {
       await ctx.reply(
-        msg.consentAccepted(
-          formatDate(
-            existing.trial_expires_at ??
-              existing.subscription_end_date ??
-              new Date(),
-          ),
+        msg.subscribeActiveGreeting(
+          formatDate(existing.subscription_end_date ?? new Date()),
         ),
         mainMenuKeyboard,
       );
+    } else if (existing.subscription_status === 'TRIAL') {
+      await ctx.reply(
+        msg.consentAccepted(
+          formatDate(existing.trial_expires_at ?? new Date()),
+        ),
+        mainMenuKeyboard,
+      );
+    } else {
+      // EXPIRED или другой
+      await ctx.reply(msg.trialExpired, mainMenuKeyboard);
     }
     await ctx.reply('Нажмите кнопку ниже, чтобы начать сверку.', newReconciliationKeyboard);
     return;
@@ -50,16 +50,23 @@ export async function handleConsentAccept(ctx: Context): Promise<void> {
   const existing = await findUserByTelegramId(telegramId);
   if (existing) {
     await ctx.answerCbQuery();
-    await ctx.reply(
-      msg.consentAccepted(
-        formatDate(
-          existing.trial_expires_at ??
-            existing.subscription_end_date ??
-            new Date(),
+    if (existing.subscription_status === 'ACTIVE') {
+      await ctx.reply(
+        msg.subscribeActiveGreeting(
+          formatDate(existing.subscription_end_date ?? new Date()),
         ),
-      ),
-      mainMenuKeyboard,
-    );
+        mainMenuKeyboard,
+      );
+    } else if (existing.subscription_status === 'TRIAL') {
+      await ctx.reply(
+        msg.consentAccepted(
+          formatDate(existing.trial_expires_at ?? new Date()),
+        ),
+        mainMenuKeyboard,
+      );
+    } else {
+      await ctx.reply(msg.trialExpired, mainMenuKeyboard);
+    }
     await ctx.reply('Нажмите кнопку ниже, чтобы начать сверку.', newReconciliationKeyboard);
     return;
   }
