@@ -70,6 +70,8 @@ export const msg = {
   // ── Subscription ──────────────────────────────────────────────────────────────
   subscribeSuccess: (expiryDate: string) =>
     `Оплата прошла успешно! Ваша подписка активна до ${expiryDate}. Спасибо!`,
+  subscribeActiveGreeting: (expiryDate: string): string =>
+    `Ваша подписка активна до ${expiryDate}.`,
   subscribeReminderExpiry: 'Ваша подписка закончится через 3 дня. Продлите, чтобы не потерять доступ: /subscribe',
   subscribeReminderInactivity:
     'Давно не сверяли выплаты? Загрузите свежие отчёты и проверьте, все ли средства поступили.',
