@@ -238,6 +238,7 @@ export const msg = {
     'На вашем тарифе доступен 1 кабинет. Несколько кабинетов (до 5) — на тарифе «Бизнес».',
   cabinetChoosePrompt: 'К какому кабинету относится эта сверка?',
   cabinetChosen: (name: string): string => `Кабинет: «${name}».`,
+  cabinetSelected: (name: string): string => `Выбран кабинет «${name}».`,
     // ── Dynamics ────────────────────────────────────────────────────────────────
   dynamicsHeader: '📊 Динамика сверок',
   dynamicsTotalRuns: (n: number): string => `Всего сверок: ${n}`,
