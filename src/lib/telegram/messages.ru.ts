@@ -13,6 +13,7 @@ export const msg = {
   // ── Main menu ────────────────────────────────────────────────────────────────
   menuNewReconciliation: '🆕 Начать новую сверку',
   menuSubscribe: '💰 Подписка',
+  menuMyCabinets: '🔑 Мои WB кабинеты',
   menuHelp: '❓ Помощь',
   menuHistory: '📜 История',
   menuDeleteData: '🗑 Удалить мои данные',
