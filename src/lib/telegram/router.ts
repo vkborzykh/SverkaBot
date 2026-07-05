@@ -14,7 +14,7 @@ import { handleStatus } from './handlers/status';
 import { handleGetReport } from './handlers/getReport';
 import { handleHelp } from './handlers/stubs';
 import { handleDeleteMyData, handleDeleteConfirm, handleDeleteCancel } from './handlers/deleteData';
-import { handleSubscribe, handleReferral } from './handlers/subscribe';
+import { handleSubscribe, handleReferral, handleTariffStart, handleTariffPro, handleTariffBusiness } from './handlers/subscribe';
 import { handleRetryImport } from './handlers/retryImport';
 import { handleCancel } from './handlers/cancelOp';
 import {
@@ -34,6 +34,7 @@ import {
   handleReplaceBank,
   handleRunSyncInline,
 } from './handlers/reconciliationFlow';
+import { TARIFF_BY_AMOUNT_KOPEKS } from '@/src/lib/billing/tariffs';
 import { msg } from './messages.ru';
 
 export interface BotContext {
@@ -77,25 +78,29 @@ export async function routeUpdate(
     const sp = update.message.successful_payment;
     const telegramId = BigInt(update.message.chat.id);
 
-    // Проверка суммы и валюты на сервере
-    if (sp.total_amount !== 150000 && sp.total_amount !== 120000 || sp.currency !== 'RUB') {
+    // Принимаем суммы всех тарифов + скидку (120 000 для рефералов)
+    const tariff = TARIFF_BY_AMOUNT_KOPEKS[sp.total_amount];
+    const isValidAmount = tariff || sp.total_amount === 120000; // реферальная скидка 1 200 ₽
+    if (!isValidAmount || sp.currency !== 'RUB') {
       console.error('[successful_payment] Invalid amount or currency', sp.total_amount, sp.currency);
-      return; // тихо игнорируем, не подтверждаем
+      return;
     }
 
     try {
       const user = await findUserByTelegramId(telegramId);
       if (user) {
-        // Идемпотентность: ищем транзакцию по charge_id
         const existing = await findBillingTransactionByProviderTxId(sp.telegram_payment_charge_id);
-        if (existing) {
-          return; // уже обработана
-        }
+        if (existing) return;
 
         const { activateSubscription } = await import('@/src/lib/billing/subscription');
         const endDate = await activateSubscription(user.id, 30);
 
-        // Реферальный бонус: если пользователь был приглашён, начисляем +14 дней рефереру
+        // Сохраняем тариф и сбрасываем счётчик сверок
+        if (tariff) {
+          await updateUser(user.id, { tariff, monthly_reconciliations: 0 });
+        }
+
+        // Реферальный бонус
         let referralBonusGranted = false;
         if (user.invited_by) {
           const referrer = await findUserByTelegramId(user.invited_by);
@@ -104,7 +109,6 @@ export async function routeUpdate(
             await updateUser(referrer.id, { subscription_end_date: newEndDate });
             referralBonusGranted = true;
 
-            // Уведомляем реферера
             const token = process.env.TELEGRAM_BOT_TOKEN;
             if (token) {
               fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -299,15 +303,6 @@ export async function routeUpdate(
     if (!data) return;
 
     switch (data) {
-      case 'tariff_start':
-        await import('./handlers/subscribe').then(m => m.handleTariffStart(ctx as any));
-        break;
-      case 'tariff_pro':
-        await import('./handlers/subscribe').then(m => m.handleTariffPro(ctx as any));
-        break;
-      case 'tariff_business':
-        await import('./handlers/subscribe').then(m => m.handleTariffBusiness(ctx as any));
-        break;        
       case 'consent:accept':
         await handleConsentAccept(ctx as Parameters<typeof handleConsentAccept>[0]);
         break;
@@ -342,7 +337,16 @@ export async function routeUpdate(
         break;
       case 'subscribe_inline':
         await handleSubscribe(ctx as any);
-        break;        
+        break;
+      case 'tariff_start':
+        await handleTariffStart(ctx as any);
+        break;
+      case 'tariff_pro':
+        await handleTariffPro(ctx as any);
+        break;
+      case 'tariff_business':
+        await handleTariffBusiness(ctx as any);
+        break;
     }
   }
 }
