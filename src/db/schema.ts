@@ -46,6 +46,8 @@ export const users = pgTable(
     }),
     has_used_trial: boolean('has_used_trial').notNull().default(false),
     invited_by: bigint('invited_by', { mode: 'bigint' }),
+    tariff: text('tariff').default('START'),
+    monthly_reconciliations: integer('monthly_reconciliations').default(0),    
     last_update_id: bigint('last_update_id', { mode: 'bigint' }),
     created_at: timestamp('created_at', { withTimezone: true })
       .defaultNow()
