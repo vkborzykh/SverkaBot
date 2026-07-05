@@ -5,6 +5,7 @@ import { findImportById } from '@/src/db/repositories/imports';
 import { reconcileWbPayout, type WbPayoutResult } from '@/src/lib/reconciliation/wbPayout';
 import { enqueue } from '@/src/lib/jobs/queue';
 import { clearSession } from '@/src/lib/telegram/session';
+import { hasProFeatures, hasBusinessFeatures } from '@/src/lib/billing/tariffs';
 
 async function notifyUser(telegramId: bigint, text: string): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -50,20 +51,32 @@ function buildUserMessage(r: WbPayoutResult): string {
   return message;
 }
 
+type UserRow = NonNullable<Awaited<ReturnType<typeof findUserById>>>;
+
+/** Отчёт доступен на активном триале и на любом оплаченном тарифе
+ *  (START, PRO, BUSINESS — без различий). */
+function hasReportAccess(user: UserRow, now: Date): boolean {
+  const isTrialActive =
+    user.subscription_status === 'TRIAL' &&
+    user.trial_expires_at != null &&
+    new Date(user.trial_expires_at) > now;
+  const isSubActive =
+    user.subscription_status === 'ACTIVE' &&
+    user.subscription_end_date != null &&
+    new Date(user.subscription_end_date) > now;
+  return Boolean(isTrialActive || isSubActive);
+}
+
 export async function handleReconcile(job: Job): Promise<void> {
   const runId = (job.payload as Record<string, string>)?.run_id ?? job.entity_id;
   if (!runId) throw new Error('Missing run_id in job payload');
-
   const run = await findRunById(runId);
   if (!run) throw new Error(`Reconciliation run not found: ${runId}`);
   if (run.status === 'COMPLETED' || run.status === 'FAILED' || run.status === 'CANCELLED') return;
-
   const user = await findUserById(run.user_id);
-
   try {
     await updateRun(runId, { status: 'RUNNING', started_at: run.started_at ?? new Date() });
     const result = await reconcileWbPayout(run);
-
     const turnoverKopeks = result.expectedNetKopeks;
     const diff = result.expectedNetKopeks - result.receivedKopeks;
     const lossKopeks = diff > BigInt(0) ? diff : BigInt(0);
@@ -71,7 +84,6 @@ export async function handleReconcile(job: Job): Promise<void> {
       lossKopeks > BigInt(0) && turnoverKopeks > BigInt(0)
         ? ((Number(lossKopeks) / Number(turnoverKopeks)) * 100).toFixed(4)
         : null;
-
     await updateRun(runId, {
       status: 'COMPLETED',
       completed_at: new Date(),
@@ -87,17 +99,23 @@ export async function handleReconcile(job: Job): Promise<void> {
       loss_kopeks: lossKopeks,
       loss_percent: lossPercent,
     });
-
     if (user?.telegram_id) {
       const now = new Date();
-      const isTrialActive = user.subscription_status === 'TRIAL' && user.trial_expires_at && new Date(user.trial_expires_at) > now;
-      const isSubActive = user.subscription_status === 'ACTIVE' && user.subscription_end_date && new Date(user.subscription_end_date) > now;
-
-      if (isTrialActive || isSubActive) {
-        await enqueue('report_export', runId, { run_id: runId });
-        await notifyUser(user.telegram_id, buildUserMessage(result) + '\n\n📄 Готовлю отчёт – он придёт в течение минуты.');
+      if (hasReportAccess(user, now)) {
+        // Тарифные флаги для генератора отчёта:
+        // google_sheets — PRO и BUSINESS (Бизнес включает всё из Профи),
+        // csv_export — только BUSINESS.
+        await enqueue('report_export', runId, {
+          run_id: runId,
+          google_sheets: hasProFeatures(user.tariff),
+          csv_export: hasBusinessFeatures(user.tariff),
+        });
+        await notifyUser(
+          user.telegram_id,
+          buildUserMessage(result) + '\n\n📄 Готовлю отчёт – он придёт в течение минуты.',
+        );
       }
-      // Если нет доступа – просто не отправляем ничего (сверка не должна была запуститься)
+      // Если нет доступа – просто не отправляем ничего
       await clearSession(user.telegram_id);
     }
   } catch (err) {
