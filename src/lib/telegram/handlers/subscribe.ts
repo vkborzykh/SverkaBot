@@ -5,7 +5,7 @@ import { msg } from '../messages.ru';
 const TARIFFS = {
   START: { priceKopeks: 99000, label: '🚀 Старт', desc: '30 дней, до 4 сверок в месяц' },
   PRO: { priceKopeks: 199000, label: '⚡ Профи', desc: '30 дней, безлимит, Google Sheets, Динамика, приоритет' },
-  BUSINESS: { priceKopeks: 499000, label: '🏢 Бизнес', desc: '30 дней, до 5 кабинетов, CSV, хранение 365 дней' },
+  BUSINESS: { priceKopeks: 499000, label: '💼 Бизнес', desc: '30 дней, до 5 кабинетов, CSV, хранение 365 дней' },
 };
 
 export async function handleSubscribe(ctx: Context): Promise<void> {
