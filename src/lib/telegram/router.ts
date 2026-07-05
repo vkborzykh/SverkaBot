@@ -40,6 +40,7 @@ import {
   handleCabinetAdd,
   handleCabinetDelete,
   handleCabinetNameReceived,
+  handleCabinetUse,
 } from './handlers/myCabinets';
 import { handleDynamics, handleDynamicsFilter } from './handlers/dynamics';
 import { TARIFF_BY_AMOUNT_KOPEKS } from '@/src/lib/billing/tariffs';
@@ -325,6 +326,10 @@ export async function routeUpdate(
     }
     if (data.startsWith('cabinet_pick:')) {
       await handleCabinetPick(ctx as any, data.slice('cabinet_pick:'.length));
+      return;
+    }
+    if (data.startsWith('cabinet_use:')) {
+      await handleCabinetUse(ctx as any, data.slice('cabinet_use:'.length));
       return;
     }
     if (data.startsWith('dynamics_cabinet:')) {
