@@ -479,6 +479,7 @@ export const reports = pgTable(
     export_type: reportTypeEnum('export_type'),
     report_version: integer('report_version'),
     is_primary: boolean('is_primary').default(true),
+    retention_days: integer('retention_days'),
     created_at: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
