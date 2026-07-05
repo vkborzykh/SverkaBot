@@ -12,6 +12,16 @@ function fmtDate(d: string | Date): string {
   return `${p(dt.getDate())}.${p(dt.getMonth() + 1)}.${dt.getFullYear()}`;
 }
 
+/** Отправляет список сверок как inline-кнопки с заданным текстовым заголовком */
+async function sendRunList(ctx: BotContext, header: string, runs: any[]) {
+  const buttons = runs.map((r, i) => ({
+    text: `${i + 1}. ${fmtDate(r.created_at)} – ${r.loss_kopeks && BigInt(r.loss_kopeks) > BigInt(0) ? 'недоплата' : 'ок'}`,
+    callback_data: `history_report:${r.id}`,
+  }));
+  const inlineKeyboard = buttons.map((btn) => [btn]);
+  await ctx.reply(header, { reply_markup: { inline_keyboard: inlineKeyboard } });
+}
+
 export async function handleHistory(ctx: BotContext): Promise<void> {
   const from = ctx.from;
   if (!from) return;
@@ -30,22 +40,13 @@ export async function handleHistory(ctx: BotContext): Promise<void> {
     return;
   }
 
-  // Пытаемся сгруппировать по кабинетам
   const cabinets = await findCabinetsByUserId(user.id);
 
-  // Формируем кнопки: каждая сверка — кнопка с callback_data = "history_report:<run_id>"
-  const makeButton = (run: (typeof completed)[number], label: string) => ({
-    text: label,
-    callback_data: `history_report:${run.id}`,
-  });
-
-  let inlineKeyboard: { text: string; callback_data: string }[][] = [];
-
   if (cabinets.length > 0) {
-    // Есть кабинеты — группируем кнопки с подзаголовками
+    // Группируем сверки по cabinet_id
     const cabinetMap = new Map(cabinets.map((c) => [c.id, c.name]));
     const byCabinet = new Map<string | null, typeof completed>();
-    byCabinet.set(null, []);
+    byCabinet.set(null, []); // сверки без кабинета
 
     for (const cab of cabinets) {
       byCabinet.set(cab.id, []);
@@ -59,38 +60,23 @@ export async function handleHistory(ctx: BotContext): Promise<void> {
       byCabinet.get(target)!.push(run);
     }
 
-    // Сначала без кабинета
+    // Сверки без кабинета
     const noCab = byCabinet.get(null)!;
     if (noCab.length > 0) {
-      inlineKeyboard.push([{ text: '📂 Без кабинета', callback_data: 'none' }]);
-      noCab.forEach((r, i) => {
-        inlineKeyboard.push([makeButton(r, `${i + 1}. ${fmtDate(r.created_at)} – ${r.loss_kopeks && BigInt(r.loss_kopeks) > BigInt(0) ? 'недоплата' : 'ок'}`)]);
-      });
+      await sendRunList(ctx, msg.historyHeader, noCab);
     }
 
-    // Затем по кабинетам
+    // По каждому кабинету отдельное сообщение
     for (const cab of cabinets) {
       const cabRuns = byCabinet.get(cab.id)!;
       if (cabRuns.length > 0) {
-        inlineKeyboard.push([{ text: `🗂 ${cab.name}`, callback_data: 'none' }]);
-        cabRuns.forEach((r, i) => {
-          inlineKeyboard.push([makeButton(r, `${i + 1}. ${fmtDate(r.created_at)} – ${r.loss_kopeks && BigInt(r.loss_kopeks) > BigInt(0) ? 'недоплата' : 'ок'}`)]);
-        });
+        const header = `📜 Последние сверки кабинета ${cab.name}:`;
+        await sendRunList(ctx, header, cabRuns);
       }
     }
-
-    await ctx.reply(msg.historyHeader, {
-      reply_markup: { inline_keyboard: inlineKeyboard },
-    });
   } else {
-    // Нет кабинетов — просто список кнопок
-    completed.forEach((r, i) => {
-      inlineKeyboard.push([makeButton(r, `${i + 1}. ${fmtDate(r.created_at)} – ${r.loss_kopeks && BigInt(r.loss_kopeks) > BigInt(0) ? 'недоплата' : 'ок'}`)]);
-    });
-
-    await ctx.reply(msg.historyHeader, {
-      reply_markup: { inline_keyboard: inlineKeyboard },
-    });
+    // Нет кабинетов – один список
+    await sendRunList(ctx, msg.historyHeader, completed);
   }
 }
 
@@ -107,22 +93,20 @@ export async function handleHistoryReport(ctx: BotContext, runId: string): Promi
 
   const report = await findPrimaryReportByRunId(runId);
   if (!report || !report.storage_path) {
-    await ctx.reply('🤷‍♂️ Срок хранения этого HTML-отчёта уже истёк.');
+    await ctx.reply(msg.reportExpired);
     return;
   }
 
-  // Проверяем, не истекло ли хранение (retention_days + created_at < now)
   if (report.retention_days) {
     const expiryDate = new Date(report.created_at.getTime() + report.retention_days * 24 * 60 * 60 * 1000);
     if (new Date() > expiryDate) {
-      await ctx.reply('🤷‍♂️ Срок хранения этого HTML-отчёта уже истёк.');
+      await ctx.reply(msg.reportExpired);
       return;
     }
   }
 
   try {
     const buffer = await loadFile(report.storage_path);
-    // Отправка файла через Telegram API (используем ctx.replyWithDocument если доступен, иначе fetch)
     const token = process.env.TELEGRAM_BOT_TOKEN;
     if (!token || !user.telegram_id) return;
 
