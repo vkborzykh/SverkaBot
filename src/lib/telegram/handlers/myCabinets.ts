@@ -1,7 +1,7 @@
 import type { Context } from 'telegraf';
 import { msg } from '../messages.ru';
 import { setSession, clearSession } from '../session';
-import { findUserByTelegramId } from '@/src/db/repositories/users';
+import { findUserByTelegramId, updateUser } from '@/src/db/repositories/users';
 import {
   createCabinet,
   findCabinetsByUserId,
@@ -14,12 +14,27 @@ import { cabinetLimitFor, hasBusinessFeatures } from '@/src/lib/billing/tariffs'
 
 const MAX_NAME_LEN = 64;
 
-function cabinetsKeyboard(cabinets: WbCabinet[], canAdd: boolean, showUpgrade: boolean) {
-  const rows: { text: string; callback_data: string }[][] = cabinets.map((c) => [
-    { text: `🗑 ${c.name}`, callback_data: `cabinet_del:${c.id}` },
-  ]);
-  if (canAdd) rows.push([{ text: msg.addCabinetButton, callback_data: 'cabinet_add' }]);
-  if (showUpgrade) rows.push([{ text: msg.upgradeToBusinessButton, callback_data: 'tariff_business' }]);
+function cabinetsKeyboard(
+  cabinets: WbCabinet[],
+  canAdd: boolean,
+  showUpgrade: boolean,
+  currentCabinetId?: string | null,
+) {
+  const rows: { text: string; callback_data: string }[][] = [];
+  for (const c of cabinets) {
+    const isCurrent = c.id === currentCabinetId;
+    const label = `${isCurrent ? '✅ ' : ''}${c.name}`;
+    rows.push([
+      { text: label, callback_data: `cabinet_use:${c.id}` },
+      { text: '🗑', callback_data: `cabinet_del:${c.id}` },
+    ]);
+  }
+  if (canAdd) {
+    rows.push([{ text: msg.addCabinetButton, callback_data: 'cabinet_add' }]);
+  }
+  if (showUpgrade) {
+    rows.push([{ text: msg.upgradeToBusinessButton, callback_data: 'tariff_business' }]);
+  }
   return { reply_markup: { inline_keyboard: rows } };
 }
 
@@ -29,12 +44,28 @@ export async function handleMyCabinets(ctx: Context): Promise<void> {
   const cabinets = await findCabinetsByUserId(user.id);
   const limit = cabinetLimitFor(user.tariff);
   const canAdd = cabinets.length < limit;
-  // Кнопку апгрейда показываем, когда лимит упёрся и это не BUSINESS
   const showUpgrade = !canAdd && !hasBusinessFeatures(user.tariff);
-  const header = cabinets.length > 0
-    ? msg.myCabinetsHeader(cabinets.length, limit)
-    : msg.myCabinetsEmpty(limit);
-  await ctx.reply(header, cabinetsKeyboard(cabinets, canAdd, showUpgrade));
+  const header =
+    cabinets.length > 0
+      ? msg.myCabinetsHeader(cabinets.length, limit)
+      : msg.myCabinetsEmpty(limit);
+  await ctx.reply(header, cabinetsKeyboard(cabinets, canAdd, showUpgrade, user.current_cabinet_id));
+}
+
+/** Обработчик выбора кабинета (переключение текущего) */
+export async function handleCabinetUse(ctx: Context, cabinetId: string): Promise<void> {
+  await ctx.answerCbQuery?.();
+  const user = await findUserByTelegramId(BigInt(ctx.from!.id));
+  if (!user) return;
+  const cabinet = await findCabinetById(cabinetId);
+  if (!cabinet || cabinet.user_id !== user.id) {
+    await ctx.reply(msg.cabinetNotFound);
+    return;
+  }
+  await updateUser(user.id, { current_cabinet_id: cabinetId });
+  await ctx.reply(msg.cabinetSelected(cabinet.name));
+  // После выбора показываем обновлённый список
+  await handleMyCabinets(ctx);
 }
 
 export async function handleCabinetAdd(ctx: Context): Promise<void> {
@@ -58,16 +89,14 @@ export async function handleCabinetAdd(ctx: Context): Promise<void> {
   await ctx.reply(msg.cabinetAddPrompt);
 }
 
-/** Вызывается из router.ts, когда state === 'awaiting_cabinet_name'. */
 export async function handleCabinetNameReceived(ctx: Context, rawName: string): Promise<void> {
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user) return;
   const name = rawName.trim();
   if (!name || name.length > MAX_NAME_LEN) {
     await ctx.reply(msg.cabinetNameInvalid);
-    return; // остаёмся в awaiting_cabinet_name
+    return;
   }
-  // Повторная проверка лимита — защита от гонки двух сообщений
   const [count, limit] = [await countCabinetsByUserId(user.id), cabinetLimitFor(user.tariff)];
   if (count >= limit) {
     await clearSession(BigInt(ctx.from!.id));
@@ -75,9 +104,12 @@ export async function handleCabinetNameReceived(ctx: Context, rawName: string): 
     return;
   }
   try {
-    await createCabinet({ user_id: user.id, name });
+    const newCab = await createCabinet({ user_id: user.id, name });
+    // Если это первый кабинет и current_cabinet_id не задан, делаем его текущим
+    if (!user.current_cabinet_id && count === 0) {
+      await updateUser(user.id, { current_cabinet_id: newCab.id });
+    }
   } catch (err) {
-    // Уникальный индекс (user_id, name) → дубликат имени
     console.error('[myCabinets] createCabinet error:', err);
     await ctx.reply(msg.cabinetDuplicate);
     return;
@@ -92,12 +124,15 @@ export async function handleCabinetDelete(ctx: Context, cabinetId: string): Prom
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user) return;
   const cabinet = await findCabinetById(cabinetId);
-  // Ownership-проверка обязательна: id приходит из callback_data
   if (!cabinet || cabinet.user_id !== user.id) {
     await ctx.reply(msg.cabinetNotFound);
     return;
   }
   await softDeleteCabinet(cabinetId);
+  // Если удалённый кабинет был текущим, сбрасываем current_cabinet_id
+  if (user.current_cabinet_id === cabinetId) {
+    await updateUser(user.id, { current_cabinet_id: null });
+  }
   await ctx.reply(msg.cabinetDeleted(cabinet.name));
   await handleMyCabinets(ctx);
 }
