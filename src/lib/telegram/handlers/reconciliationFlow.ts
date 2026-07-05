@@ -9,6 +9,8 @@ import { startReconciliation } from '@/src/lib/reconciliation/startRun';
 import { monthlyLimitFor } from '@/src/lib/billing/tariffs';
 import { findCabinetsByUserId, findCabinetById } from '@/src/db/repositories/wb-cabinets';
 
+const TRIAL_LIMIT = 3; // 3 бесплатные сверки за пробный период
+
 function paywallReply(ctx: Context, text: string) {
   return ctx.reply(text, {
     reply_markup: {
@@ -18,15 +20,13 @@ function paywallReply(ctx: Context, text: string) {
 }
 
 export async function handleNewReconciliation(ctx: Context, userId: string): Promise<void> {
-  // Проверка доступа
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user || checkAccess(user) !== 'full') {
     await paywallReply(ctx, msg.accessExpired);
     return;
   }
 
-  // ➕ Мультикабинет: если кабинетов больше одного — спрашиваем, к какому
-  // относится сверка. Один кабинет — подставляем автоматически. Ноль — как раньше.
+  // Мультикабинет: если кабинетов больше одного — выбор
   const cabinets = await findCabinetsByUserId(user.id);
   if (cabinets.length > 1) {
     await setSession(BigInt(ctx.from!.id), 'choosing_cabinet', {});
@@ -45,7 +45,6 @@ export async function handleNewReconciliation(ctx: Context, userId: string): Pro
   await ctx.reply(msg.newReconciliationPrompt, uploadWbInlineKeyboard);
 }
 
-/** ➕ Callback `cabinet_pick:<id>` — пользователь выбрал кабинет для сверки. */
 export async function handleCabinetPick(ctx: Context, cabinetId: string): Promise<void> {
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user || checkAccess(user) !== 'full') {
@@ -53,7 +52,6 @@ export async function handleCabinetPick(ctx: Context, cabinetId: string): Promis
     return;
   }
   const cabinet = await findCabinetById(cabinetId);
-  // Ownership: id пришёл из callback_data, доверять нельзя
   if (!cabinet || cabinet.user_id !== user.id) {
     await ctx.answerCbQuery?.();
     await ctx.reply(msg.cabinetNotFound);
@@ -66,7 +64,6 @@ export async function handleCabinetPick(ctx: Context, cabinetId: string): Promis
 }
 
 export async function handleUploadWbInline(ctx: Context): Promise<void> {
-  // Проверка доступа
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user || checkAccess(user) !== 'full') {
     await paywallReply(ctx, msg.accessExpired);
@@ -127,17 +124,31 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
     return;
   }
 
-  // Лимит сверок: только для оплаченной подписки. START → 4,
-  // PRO/BUSINESS → null (безлимит): BUSINESS проходит везде, где PRO.
-  const limit = user.subscription_status === 'ACTIVE' ? monthlyLimitFor(user.tariff) : null;
   const used = user.monthly_reconciliations ?? 0;
-  if (limit !== null && used >= limit) {
-    await ctx.reply(msg.startLimitReached(limit), {
-      reply_markup: {
-        inline_keyboard: [[{ text: msg.upgradeToProButton, callback_data: 'tariff_pro' }]],
-      },
-    });
-    return;
+
+  // Проверка лимита для TRIAL (3 сверки за весь пробный период)
+  if (user.subscription_status === 'TRIAL') {
+    if (used >= TRIAL_LIMIT) {
+      await ctx.reply(msg.trialLimitReached(TRIAL_LIMIT), {
+        reply_markup: {
+          inline_keyboard: [[{ text: '💰 Подписка', callback_data: 'subscribe_inline' }]],
+        },
+      });
+      return;
+    }
+  }
+
+  // Лимит сверок для платных тарифов (START → 4, PRO/BUSINESS → безлимит)
+  if (user.subscription_status === 'ACTIVE') {
+    const limit = monthlyLimitFor(user.tariff);
+    if (limit !== null && used >= limit) {
+      await ctx.reply(msg.startLimitReached(limit), {
+        reply_markup: {
+          inline_keyboard: [[{ text: msg.upgradeToProButton, callback_data: 'tariff_pro' }]],
+        },
+      });
+      return;
+    }
   }
 
   await ctx.answerCbQuery();
@@ -160,11 +171,21 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
       return;
     }
     await enqueue('reconcile', result.run_id, { run_id: result.run_id });
-    // Списываем попытку только после успешного старта сверки
-    if (limit !== null) {
-      await updateUser(user.id, { monthly_reconciliations: used + 1 });
+
+    // Увеличиваем счётчик после успешного старта
+    await updateUser(user.id, { monthly_reconciliations: used + 1 });
+
+    // Сообщение об оставшихся сверках для TRIAL
+    if (user.subscription_status === 'TRIAL') {
+      const remaining = TRIAL_LIMIT - (used + 1);
+      if (remaining > 0) {
+        await ctx.reply(`✅ Сверка запущена. Осталось ${remaining} из ${TRIAL_LIMIT} пробных сверок.`);
+      } else {
+        await ctx.reply(msg.syncStarted);
+      }
+    } else {
+      await ctx.reply(msg.syncStarted);
     }
-    await ctx.reply(msg.syncStarted);
   } catch (err) {
     console.error('[runSyncInline] error:', err);
     await ctx.reply('Произошла ошибка при запуске сверки.');
