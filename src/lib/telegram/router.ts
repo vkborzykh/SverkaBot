@@ -9,7 +9,7 @@ import {
   handleBankFileReceived,
   type DocumentInfo,
 } from './handlers/upload';
-import { handleHistory } from './handlers/history';
+import { handleHistory, handleHistoryReport } from './handlers/history';
 import { handleStatus } from './handlers/status';
 import { handleGetReport } from './handlers/getReport';
 import { handleHelp } from './handlers/stubs';
@@ -329,6 +329,10 @@ export async function routeUpdate(
     }
     if (data.startsWith('dynamics_cabinet:')) {
       await handleDynamicsFilter(ctx as any, data.slice('dynamics_cabinet:'.length));
+      return;
+    }
+    if (data.startsWith('history_report:')) {
+      await handleHistoryReport(ctx as any, data.slice('history_report:'.length));
       return;
     }
     if (data === 'dynamics_all') {
