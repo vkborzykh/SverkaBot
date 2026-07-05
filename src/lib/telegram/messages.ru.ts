@@ -235,4 +235,14 @@ export const msg = {
     'На вашем тарифе доступен 1 кабинет. Несколько кабинетов (до 5) — на тарифе «Бизнес».',
   cabinetChoosePrompt: 'К какому кабинету относится эта сверка?',
   cabinetChosen: (name: string): string => `Кабинет: «${name}».`,
+    // ── Dynamics ────────────────────────────────────────────────────────────────
+  dynamicsHeader: '📊 Динамика сверок',
+  dynamicsTotalRuns: (n: number): string => `Всего сверок: ${n}`,
+  dynamicsTotalExpected: (amount: string): string => `Ожидалось к выплате: ${amount}`,
+  dynamicsTotalReceived: (amount: string): string => `Поступило: ${amount}`,
+  dynamicsTotalLoss: (amount: string): string => `Неподтверждённые выплаты: ${amount}`,
+  dynamicsAvgLossPercent: (pct: string): string => `Средний процент потерь: ${pct}%`,
+  dynamicsUpgradeToPro: 'Страница «Динамика» доступна на тарифах «Профи» и «Бизнес». Перейдите на Профи, чтобы видеть сводную аналитику.',
+  dynamicsFilterAll: 'Все кабинеты',
+  dynamicsCabinetLabel: (name: string): string => `🗂 ${name}`,
 } as const;
