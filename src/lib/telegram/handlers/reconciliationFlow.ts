@@ -6,6 +6,7 @@ import { findUserByTelegramId, updateUser } from '@/src/db/repositories/users';
 import { checkAccess } from '@/src/lib/telegram/access';
 import { enqueue } from '@/src/lib/jobs/queue';
 import { startReconciliation } from '@/src/lib/reconciliation/startRun';
+import { monthlyLimitFor } from '@/src/lib/billing/tariffs';
 
 function paywallReply(ctx: Context, text: string) {
   return ctx.reply(text, {
@@ -88,19 +89,18 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
     return;
   }
 
-  // Проверка лимита для тарифа «Старт»
-  if (user.subscription_status === 'ACTIVE' && user.tariff === 'START') {
-    const count = user.monthly_reconciliations ?? 0;
-    if (count >= 4) {
-      await ctx.reply('Вы достигли лимита в 4 сверки по тарифу «Старт». Перейдите на «Профи» для безлимитных сверок.', {
-        reply_markup: {
-          inline_keyboard: [[{ text: '⚡ Перейти на Профи', callback_data: 'tariff_pro' }]],
-        },
-      });
-      return;
-    }
-    // Увеличиваем счётчик
-    await updateUser(user.id, { monthly_reconciliations: count + 1 });
+  // Лимит сверок применяется только к оплаченной подписке (TRIAL — без лимита).
+  // monthlyLimitFor: START → 4, PRO/BUSINESS → null (безлимит).
+  // BUSINESS автоматически проходит везде, где проходит PRO.
+  const limit = user.subscription_status === 'ACTIVE' ? monthlyLimitFor(user.tariff) : null;
+  const used = user.monthly_reconciliations ?? 0;
+  if (limit !== null && used >= limit) {
+    await ctx.reply(msg.startLimitReached(limit), {
+      reply_markup: {
+        inline_keyboard: [[{ text: msg.upgradeToProButton, callback_data: 'tariff_pro' }]],
+      },
+    });
+    return;
   }
 
   await ctx.answerCbQuery();
@@ -108,12 +108,10 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
   const payload = await getSessionPayload(telegramId) ?? {};
   const wbImportId = payload.wb_import_id as string | undefined;
   const bankImportId = payload.bank_import_id as string | undefined;
-
   if (!wbImportId || !bankImportId) {
     await ctx.reply(msg.syncNeedBothFiles);
     return;
   }
-
   try {
     const result = await startReconciliation({ userId: user.id, wbImportId, bankImportId });
     if ('error' in result) {
@@ -125,6 +123,11 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
       return;
     }
     await enqueue('reconcile', result.run_id, { run_id: result.run_id });
+    // Списываем попытку только после успешного старта сверки —
+    // неудачные запуски не тратят лимит тарифа «Старт».
+    if (limit !== null) {
+      await updateUser(user.id, { monthly_reconciliations: used + 1 });
+    }
     await ctx.reply(msg.syncStarted);
   } catch (err) {
     console.error('[runSyncInline] error:', err);
