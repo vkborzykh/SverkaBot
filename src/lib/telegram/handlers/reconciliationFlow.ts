@@ -2,7 +2,7 @@ import type { Context } from 'telegraf';
 import { setSession, getSessionPayload, updateSessionPayload, clearSession } from '../session';
 import { newReconciliationKeyboard, uploadWbInlineKeyboard, wbCompletedKeyboard, bankCompletedKeyboard, reconciliationFinishedKeyboard } from '../keyboard';
 import { msg } from '../messages.ru';
-import { findUserByTelegramId } from '@/src/db/repositories/users';
+import { findUserByTelegramId, updateUser } from '@/src/db/repositories/users';
 import { checkAccess } from '@/src/lib/telegram/access';
 import { enqueue } from '@/src/lib/jobs/queue';
 import { startReconciliation } from '@/src/lib/reconciliation/startRun';
@@ -87,6 +87,22 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
     await paywallReply(ctx, msg.accessExpired);
     return;
   }
+
+  // Проверка лимита для тарифа «Старт»
+  if (user.subscription_status === 'ACTIVE' && user.tariff === 'START') {
+    const count = user.monthly_reconciliations ?? 0;
+    if (count >= 4) {
+      await ctx.reply('Вы достигли лимита в 4 сверки по тарифу «Старт». Перейдите на «Профи» для безлимитных сверок.', {
+        reply_markup: {
+          inline_keyboard: [[{ text: '⚡ Перейти на Профи', callback_data: 'tariff_pro' }]],
+        },
+      });
+      return;
+    }
+    // Увеличиваем счётчик
+    await updateUser(user.id, { monthly_reconciliations: count + 1 });
+  }
+
   await ctx.answerCbQuery();
   const telegramId = BigInt(ctx.from!.id);
   const payload = await getSessionPayload(telegramId) ?? {};
