@@ -8,22 +8,21 @@ export async function activateSubscription(
   if (!user) throw new Error(`User not found: ${userId}`);
 
   const now = new Date();
-  let baseDate = now;
-
-  // If user already has active subscription, extend from current end date
-  if (
+  // Если подписка уже активна и не истекла – продлеваем от её окончания.
+  // Иначе начинаем новую с сегодняшнего дня.
+  const baseDate =
     user.subscription_status === 'ACTIVE' &&
     user.subscription_end_date &&
     user.subscription_end_date > now
-  ) {
-    baseDate = user.subscription_end_date;
-  }
+      ? user.subscription_end_date
+      : now;
 
   const endDate = new Date(baseDate.getTime() + durationDays * 24 * 60 * 60 * 1000);
 
   await updateUser(userId, {
     subscription_status: 'ACTIVE',
     subscription_end_date: endDate,
+    trial_expires_at: null, // сбрасываем триал, если он был
   });
 
   return endDate;
