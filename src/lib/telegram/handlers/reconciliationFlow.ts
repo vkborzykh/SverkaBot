@@ -7,6 +7,7 @@ import { checkAccess } from '@/src/lib/telegram/access';
 import { enqueue } from '@/src/lib/jobs/queue';
 import { startReconciliation } from '@/src/lib/reconciliation/startRun';
 import { monthlyLimitFor } from '@/src/lib/billing/tariffs';
+import { findCabinetsByUserId, findCabinetById } from '@/src/db/repositories/wb-cabinets';
 
 function paywallReply(ctx: Context, text: string) {
   return ctx.reply(text, {
@@ -23,7 +24,44 @@ export async function handleNewReconciliation(ctx: Context, userId: string): Pro
     await paywallReply(ctx, msg.accessExpired);
     return;
   }
-  await setSession(BigInt(ctx.from!.id), 'reconciliation_active', {});
+
+  // ➕ Мультикабинет: если кабинетов больше одного — спрашиваем, к какому
+  // относится сверка. Один кабинет — подставляем автоматически. Ноль — как раньше.
+  const cabinets = await findCabinetsByUserId(user.id);
+  if (cabinets.length > 1) {
+    await setSession(BigInt(ctx.from!.id), 'choosing_cabinet', {});
+    await ctx.reply(msg.cabinetChoosePrompt, {
+      reply_markup: {
+        inline_keyboard: cabinets.map((c) => [
+          { text: c.name, callback_data: `cabinet_pick:${c.id}` },
+        ]),
+      },
+    });
+    return;
+  }
+
+  const payload = cabinets.length === 1 ? { cabinet_id: cabinets[0].id } : {};
+  await setSession(BigInt(ctx.from!.id), 'reconciliation_active', payload);
+  await ctx.reply(msg.newReconciliationPrompt, uploadWbInlineKeyboard);
+}
+
+/** ➕ Callback `cabinet_pick:<id>` — пользователь выбрал кабинет для сверки. */
+export async function handleCabinetPick(ctx: Context, cabinetId: string): Promise<void> {
+  const user = await findUserByTelegramId(BigInt(ctx.from!.id));
+  if (!user || checkAccess(user) !== 'full') {
+    await paywallReply(ctx, msg.accessExpired);
+    return;
+  }
+  const cabinet = await findCabinetById(cabinetId);
+  // Ownership: id пришёл из callback_data, доверять нельзя
+  if (!cabinet || cabinet.user_id !== user.id) {
+    await ctx.answerCbQuery?.();
+    await ctx.reply(msg.cabinetNotFound);
+    return;
+  }
+  await ctx.answerCbQuery?.();
+  await setSession(BigInt(ctx.from!.id), 'reconciliation_active', { cabinet_id: cabinet.id });
+  await ctx.reply(msg.cabinetChosen(cabinet.name));
   await ctx.reply(msg.newReconciliationPrompt, uploadWbInlineKeyboard);
 }
 
@@ -89,9 +127,8 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
     return;
   }
 
-  // Лимит сверок применяется только к оплаченной подписке (TRIAL — без лимита).
-  // monthlyLimitFor: START → 4, PRO/BUSINESS → null (безлимит).
-  // BUSINESS автоматически проходит везде, где проходит PRO.
+  // Лимит сверок: только для оплаченной подписки. START → 4,
+  // PRO/BUSINESS → null (безлимит): BUSINESS проходит везде, где PRO.
   const limit = user.subscription_status === 'ACTIVE' ? monthlyLimitFor(user.tariff) : null;
   const used = user.monthly_reconciliations ?? 0;
   if (limit !== null && used >= limit) {
@@ -123,8 +160,7 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
       return;
     }
     await enqueue('reconcile', result.run_id, { run_id: result.run_id });
-    // Списываем попытку только после успешного старта сверки —
-    // неудачные запуски не тратят лимит тарифа «Старт».
+    // Списываем попытку только после успешного старта сверки
     if (limit !== null) {
       await updateUser(user.id, { monthly_reconciliations: used + 1 });
     }
