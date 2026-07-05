@@ -5,6 +5,8 @@ import { findMatchItemsByMatchId } from '@/src/db/repositories/reconciliation-ma
 import { findEvidenceByMatchId } from '@/src/db/repositories/reconciliation-evidence';
 import { findTransactionsByImportId, type CanonicalTransaction } from '@/src/db/repositories/canonical-transactions';
 import { findUserById } from '@/src/db/repositories/users';
+import { findImportById } from '@/src/db/repositories/imports';
+import { findCabinetById } from '@/src/db/repositories/wb-cabinets';
 import { findPrimaryReportByRunId, createReport } from '@/src/db/repositories/reports';
 import { storeReport } from '@/src/lib/ingestion/storage';
 import { buildHtmlReport, type ClaimRow, type ReportTxRow } from '@/src/lib/reports/htmlReport';
@@ -30,7 +32,6 @@ async function sendMessageToUser(telegramId: bigint, text: string, keyboard?: an
   }
 }
 
-// Форматирование копеек в рубли с разделителями
 function rub(kopeks: bigint): string {
   const neg = kopeks < BigInt(0);
   const a = neg ? -kopeks : kopeks;
@@ -52,13 +53,25 @@ export async function handleReportExport(job: Job): Promise<void> {
 
   const user = await findUserById(run.user_id);
 
+  // ➕ cabinet: название кабинета для шапки отчёта (best-effort)
+  let cabinetName: string | null = null;
+  try {
+    const wbImport = await findImportById(run.wb_import_id);
+    const cabId = (wbImport as { cabinet_id?: string | null } | undefined)?.cabinet_id;
+    if (cabId) {
+      cabinetName = (await findCabinetById(cabId))?.name ?? null;
+    }
+  } catch (err) {
+    console.error('[reportExport] cabinet lookup failed:', err);
+  }
+
   const [wbTxs, bankTxs, matches] = await Promise.all([
     findTransactionsByImportId(run.wb_import_id),
     findTransactionsByImportId(run.bank_import_id),
     findMatchesByRunId(runId),
   ]);
 
-  // ── Aggregate financials + which bank credits were attributed to WB ──
+  // ── Aggregate financials ──
   let grossPayoutKopeks = BigInt(0);
   let commissionsKopeks = BigInt(0);
   let expectedKopeks = BigInt(0);
@@ -87,11 +100,7 @@ export async function handleReportExport(job: Job): Promise<void> {
     lossKopeks > BigInt(0) && expectedKopeks > BigInt(0)
       ? Number(((Number(lossKopeks) / Number(expectedKopeks)) * 100).toFixed(1))
       : null;
-  const matchRate = run.match_rate
-    ? Number(run.match_rate)
-    : aggStatus === 'reconciled' || aggStatus === 'overpaid'
-      ? 100
-      : 0;
+  const matchRate = run.match_rate ? Number(run.match_rate) : aggStatus === 'reconciled' || aggStatus === 'overpaid' ? 100 : 0;
 
   // ── Helpers ──
   const fmtDmy = (d: Date | string | null | undefined): string => {
@@ -114,42 +123,30 @@ export async function handleReportExport(job: Job): Promise<void> {
     counterparty: tx.counterparty,
   });
 
-  // ── Detail tables (capped for very large imports) ──
   const wbSorted = [...wbTxs].sort((a, b) => timeOf(a.transaction_date) - timeOf(b.transaction_date));
-  const bankCredits = [...bankTxs]
-    .filter((t) => ((t.direction as string) ?? 'IN') !== 'OUT')
-    .sort((a, b) => timeOf(a.transaction_date) - timeOf(b.transaction_date));
+  const bankCredits = [...bankTxs].filter((t) => ((t.direction as string) ?? 'IN') !== 'OUT').sort((a, b) => timeOf(a.transaction_date) - timeOf(b.transaction_date));
   const wbBankCredits = bankCredits.filter((t) => matchedBankTxIds.has(t.id));
   const wbRows = wbSorted.slice(0, MAX_REPORT_ROWS).map(toRow);
   const bankRows = wbBankCredits.slice(0, MAX_REPORT_ROWS).map(toRow);
 
-  // ── Section 3: unidentified bank credits ──
   const unidentified = bankCredits.filter((t) => !matchedBankTxIds.has(t.id));
-  const unidentifiedTotalKopeks = unidentified.reduce(
-    (s, t) => s + (t.amount_kopeks ?? BigInt(0)),
-    BigInt(0),
-  );
+  const unidentifiedTotalKopeks = unidentified.reduce((s, t) => s + (t.amount_kopeks ?? BigInt(0)), BigInt(0));
   const unidentifiedRows = unidentified.slice(0, MAX_REPORT_ROWS).map(toRow);
 
-  // ── Claim: amount = actual shortfall (discrepancy), NOT the full turnover ──
   const claimAmountKopeks = lossKopeks;
   const wbTimes = wbTxs.map((t) => timeOf(t.transaction_date)).filter((n) => n > 0);
-  const claimPeriod = wbTimes.length
-    ? `${fmtDmy(new Date(Math.min(...wbTimes)))} – ${fmtDmy(new Date(Math.max(...wbTimes)))}`
-    : fmtDmy(run.created_at);
-  const claimRows: ClaimRow[] = wbSorted
-    .filter((tx) => ((tx.direction as string) ?? 'IN') !== 'OUT')
-    .slice(0, MAX_REPORT_ROWS)
-    .map((tx) => ({
-      dateStr: fmtDmy(tx.transaction_date),
-      amountKopeks: tx.amount_kopeks ?? BigInt(0),
-      reference: tx.reference,
-      description: tx.description,
-    }));
+  const claimPeriod = wbTimes.length ? `${fmtDmy(new Date(Math.min(...wbTimes)))} – ${fmtDmy(new Date(Math.max(...wbTimes)))}` : fmtDmy(run.created_at);
+  const claimRows: ClaimRow[] = wbSorted.filter((tx) => ((tx.direction as string) ?? 'IN') !== 'OUT').slice(0, MAX_REPORT_ROWS).map((tx) => ({
+    dateStr: fmtDmy(tx.transaction_date),
+    amountKopeks: tx.amount_kopeks ?? BigInt(0),
+    reference: tx.reference,
+    description: tx.description,
+  }));
 
   const htmlReport = buildHtmlReport({
     runId,
     dateStr: fmtDmy(run.created_at),
+    cabinetName,
     status: aggStatus,
     grossPayoutKopeks,
     commissionsKopeks,
@@ -172,43 +169,23 @@ export async function handleReportExport(job: Job): Promise<void> {
 
   const htmlBuffer = Buffer.from(htmlReport, 'utf-8');
   const storagePath = await storeReport(runId, htmlBuffer, 'text/html');
-
-  await createReport({
-    run_id: runId,
-    storage_path: storagePath,
-    export_type: 'HTML',
-    report_version: 1,
-    is_primary: true,
-  });
+  await createReport({ run_id: runId, storage_path: storagePath, export_type: 'HTML', report_version: 1, is_primary: true });
 
   if (process.env.PUBLIC_URL && process.env.INTERNAL_TOKEN) {
     try {
       await fetch(`${process.env.PUBLIC_URL}/api/reports/deliver`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Internal-Token': process.env.INTERNAL_TOKEN,
-        },
+        headers: { 'Content-Type': 'application/json', 'X-Internal-Token': process.env.INTERNAL_TOKEN },
         body: JSON.stringify({ run_id: runId }),
       });
-    } catch (e) {
-      console.error('[reportExport] failed to notify delivery endpoint:', e);
-    }
+    } catch (e) { console.error('[reportExport] delivery error:', e); }
   }
 
   if (user?.telegram_id) {
-    // Если есть недоплата, отправляем персонализированное сообщение
     if (lossKopeks > BigInt(0)) {
-      await sendMessageToUser(
-        user.telegram_id,
-        `🔍 Обнаружена недоплата: ${rub(lossKopeks)}. Отчёт отправлен.`,
-      );
+      await sendMessageToUser(user.telegram_id, `🔍 Обнаружена недоплата: ${rub(lossKopeks)}. Отчёт отправлен.`);
     }
     await clearSession(user.telegram_id);
-    await sendMessageToUser(
-      user.telegram_id,
-      msg.reconciliationCompleted,
-      reconciliationFinishedKeyboard,
-    );
+    await sendMessageToUser(user.telegram_id, msg.reconciliationCompleted, reconciliationFinishedKeyboard);
   }
 }
