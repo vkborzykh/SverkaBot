@@ -239,7 +239,8 @@ export const msg = {
   cabinetChoosePrompt: 'К какому кабинету относится эта сверка?',
   cabinetChosen: (name: string): string => `Кабинет: «${name}».`,
   cabinetSelected: (name: string): string => `Выбран кабинет «${name}».`,
-    // ── Dynamics ────────────────────────────────────────────────────────────────
+
+  // ── Dynamics ────────────────────────────────────────────────────────────────
   dynamicsHeader: '📊 Динамика сверок',
   dynamicsTotalRuns: (n: number): string => `Всего сверок: ${n}`,
   dynamicsTotalExpected: (amount: string): string => `Ожидалось к выплате: ${amount}`,
@@ -249,6 +250,7 @@ export const msg = {
   dynamicsUpgradeToPro: 'Страница «Динамика» доступна на тарифах «Профи» и «Бизнес». Перейдите на Профи, чтобы видеть сводную аналитику.',
   dynamicsFilterAll: 'Все кабинеты',
   dynamicsCabinetLabel: (name: string): string => `🗂 ${name}`,
+
   // ── CSV export (тариф «Бизнес») ─────────────────────────────────────────────
   csvCaption: 'CSV-выгрузка транзакций по сверке.',
   csvBusinessOnly:
@@ -261,5 +263,5 @@ export const msg = {
   historyChooseFormat: 'В каком формате прислать отчёт?',
   historyHtmlButton: '📄 HTML',
   historyCsvButton: '📊 CSV',
-  historyReportExpired: '🤷‍♂️ Срок хранения этого HTML-отчёта уже истёк.',  
+  historyReportExpired: '🤷‍♂️ Срок хранения этого HTML-отчёта уже истёк.',
 } as const;
