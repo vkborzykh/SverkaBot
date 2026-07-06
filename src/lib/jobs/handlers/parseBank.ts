@@ -23,8 +23,8 @@ import { sha256 } from '@/src/lib/ingestion/hash';
 import { getSetting } from '@/src/lib/settings/settings';
 import { msg } from '@/src/lib/telegram/messages.ru';
 import { bankCompletedKeyboard, replaceBankInlineKeyboard } from '@/src/lib/telegram/keyboard';
-import { detectHeader, type ResolvedColumns } from '@/src/lib/parsing/headerDetection';
-import { detectDelimiter, type CsvDelimiter } from '@/src/lib/ingestion/validate';
+import { detectHeader } from '@/src/lib/parsing/headerDetection';
+import { detectDelimiter } from '@/src/lib/ingestion/validate';
 
 const PARSER_VERSION = 'bank_v2';
 const ROW_LIMIT = 50_000;
@@ -159,21 +159,45 @@ export async function handleParseBank(job: Job): Promise<void> {
   const cols = header.columns;
   const dataRows = rawRows.slice(header.headerRowIndex + 1).filter((r) => r.some((c) => c !== null && c !== ''));
 
-  // Resolve profile using header signature
-  const profile = await resolveProfile({ /* адаптируйте под новый интерфейс resolveProfile */ } as any, 'signature', imp.user_id);
-  // ... (остальная логика профилей без изменений)
+  // --- Профиль (сохраняем старую логику) ---
+  const signature = rawRows[header.headerRowIndex]?.map((c) => c?.toString() ?? '').join('|') ?? '';
+  const resolveResult = await resolveProfile({ columnMapping: {}, confidence: 0.5, dateFormat: '', amountFormat: '' as any, signature }, signature, imp.user_id);
 
-  // Парсинг строк
+  let activeProfileId: string;
+  let profileConfidence: number;
+  let profileStatus: 'MATCHED' | 'DRAFT';
+  let profileDisplayName = 'Черновик: неизвестный банк';
+
+  if (resolveResult.status === 'MATCHED' && resolveResult.profileId) {
+    activeProfileId = resolveResult.profileId;
+    profileConfidence = resolveResult.confidence;
+    profileStatus = 'MATCHED';
+    const profile = await findProfileById(activeProfileId);
+    profileDisplayName = profile?.display_name ?? 'Известный банк';
+  } else {
+    activeProfileId = await createDraftProfile({ columnMapping: {}, confidence: 0.5, dateFormat: '', amountFormat: '' as any, signature }, signature, imp.user_id);
+    profileConfidence = 0.25;
+    profileStatus = 'DRAFT';
+  }
+
+  await updateImport(importId, {
+    status: 'PARSING',
+    profile_id: activeProfileId,
+    profile_status: profileStatus,
+    profile_confidence: String(profileConfidence.toFixed(4)),
+  });
+
+  // --- Парсинг строк ---
+  console.time('[parseBank] processRows');
   const transactions: NewCanonicalTransaction[] = [];
   const errors: NewParsingError[] = [];
   const successDates: Date[] = [];
 
   for (let i = 0; i < dataRows.length && i < ROW_LIMIT; i++) {
     const row = dataRows[i];
-    const rowNumber = header.headerRowIndex + i + 2; // +2 for 1-based + header
+    const rowNumber = header.headerRowIndex + i + 2;
     const rawFragment = JSON.stringify(row).slice(0, 200);
 
-    // Дата
     const rawDate = cols.date !== null ? row[cols.date] : null;
     if (!rawDate) {
       errors.push({ import_id: importId, row_number: rowNumber, error_code: 'NO_DATE', error_message: 'No date cell', raw_fragment: rawFragment });
@@ -187,7 +211,6 @@ export async function handleParseBank(job: Job): Promise<void> {
       continue;
     }
 
-    // Сумма
     let amountKopeks: bigint | null = null;
     let direction: 'IN' | 'OUT' = 'IN';
     if (cols.amount !== null) {
@@ -233,8 +256,8 @@ export async function handleParseBank(job: Job): Promise<void> {
 
     successDates.push(txDate);
   }
+  console.timeEnd('[parseBank] processRows');
 
-  // ... (сохранение транзакций, ошибок, статистика, уведомления — как в предыдущей версии)
   console.time('[parseBank] insertTransactions');
   for (let i = 0; i < transactions.length; i += INSERT_CHUNK) {
     await createTransactions(transactions.slice(i, i + INSERT_CHUNK));
@@ -269,31 +292,32 @@ export async function handleParseBank(job: Job): Promise<void> {
     failure_reason: null,
   });
 
-  // Обновление статистики профиля (если профиль был найден)
-  if (header.columns) {
-    // В будущем можно добавить вызов updateProfileStats
-  }
+  updateProfileStats(activeProfileId).catch(() => {});
 
   // Уведомление
   if (user?.telegram_id) {
-    const sessionPayload = await import('@/src/lib/telegram/session').then(m => m.getSessionPayload(user.telegram_id!));
-    const isReconciliationActive = sessionPayload && 'bank_import_id' in (sessionPayload ?? {});
+    try {
+      const sessionPayload = await import('@/src/lib/telegram/session').then(m => m.getSessionPayload(user.telegram_id!));
+      const isReconciliationActive = sessionPayload && 'bank_import_id' in (sessionPayload ?? {});
 
-    if (isReconciliationActive && periodStart && periodEnd && sessionPayload?.wb_import_id) {
-      const wbImp = await findImportById(sessionPayload.wb_import_id as string);
-      if (wbImp && wbImp.period_start && wbImp.period_end) {
-        const { periodsCover } = await import('@/src/lib/reconciliation/startRun');
-        if (!periodsCover(wbImp.period_start, wbImp.period_end, periodStart, periodEnd, 31)) {
-          await sendWithKeyboard(user.telegram_id, '⚠️ Период банковской выписки не покрывает период отчёта WB. Проверьте файлы.', replaceBankInlineKeyboard);
-          return;
+      if (isReconciliationActive && periodStart && periodEnd && sessionPayload?.wb_import_id) {
+        const wbImp = await findImportById(sessionPayload.wb_import_id as string);
+        if (wbImp && wbImp.period_start && wbImp.period_end) {
+          const { periodsCover } = await import('@/src/lib/reconciliation/startRun');
+          if (!periodsCover(wbImp.period_start, wbImp.period_end, periodStart, periodEnd, 31)) {
+            await sendWithKeyboard(user.telegram_id, '⚠️ Период банковской выписки не покрывает период отчёта WB. Проверьте файлы.', replaceBankInlineKeyboard);
+            return;
+          }
         }
       }
-    }
 
-    if (isReconciliationActive) {
-      await sendWithKeyboard(user.telegram_id, msg.uploadBankCompleted, bankCompletedKeyboard);
-    } else {
-      await notifyUser(user.telegram_id, msg.uploadBankCompleted);
+      if (isReconciliationActive) {
+        await sendWithKeyboard(user.telegram_id, msg.uploadBankCompleted, bankCompletedKeyboard);
+      } else {
+        await notifyUser(user.telegram_id, msg.uploadBankCompleted);
+      }
+    } catch (err) {
+      console.error('[parseBank] Notification error:', err);
     }
   }
 
