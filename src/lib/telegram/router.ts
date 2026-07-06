@@ -9,7 +9,7 @@ import {
   handleBankFileReceived,
   type DocumentInfo,
 } from './handlers/upload';
-import { handleHistory, handleHistoryReport } from './handlers/history';
+import { handleHistory, handleHistoryReport, handleHistoryHtml } from './handlers/history';
 import { handleStatus } from './handlers/status';
 import { handleGetReport } from './handlers/getReport';
 import { handleHelp } from './handlers/stubs';
@@ -43,6 +43,7 @@ import {
   handleCabinetUse,
 } from './handlers/myCabinets';
 import { handleDynamics, handleDynamicsFilter } from './handlers/dynamics';
+import { handleExportCsv, sendCsvForRun } from './handlers/exportCsv';
 import { TARIFF_BY_AMOUNT_KOPEKS } from '@/src/lib/billing/tariffs';
 import { msg } from './messages.ru';
 
@@ -281,6 +282,9 @@ export async function routeUpdate(
       case 'dynamics':
         await handleDynamics(ctx as any);
         break;
+      case 'export_csv':
+        await handleExportCsv(ctx as any);
+        break;
       case 'help':
         await handleHelp(ctx as Parameters<typeof handleHelp>[0]);
         break;
@@ -338,6 +342,14 @@ export async function routeUpdate(
     }
     if (data.startsWith('history_report:')) {
       await handleHistoryReport(ctx as any, data.slice('history_report:'.length));
+      return;
+    }
+    if (data.startsWith('history_html:')) {
+      await handleHistoryHtml(ctx as any, data.slice('history_html:'.length));
+      return;
+    }
+    if (data.startsWith('history_csv:')) {
+      await sendCsvForRun(ctx as any, data.slice('history_csv:'.length));
       return;
     }
     if (data === 'dynamics_all') {
