@@ -46,4 +46,23 @@ export async function softDeleteReport(id: string): Promise<Report | undefined> 
     .where(eq(reports.id, id))
     .returning();
   return rows[0];
+/** Отчёт конкретного типа по сверке (например, CSV). */
+export async function findReportByRunIdAndType(
+  runId: string,
+  exportType: 'HTML' | 'GOOGLE_SHEETS' | 'CSV',
+) {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(reports)
+    .where(
+      and(
+        eq(reports.run_id, runId),
+        eq(reports.export_type, exportType),
+        isNull(reports.deleted_at),
+      ),
+    )
+    .limit(1);
+  return row;
+}  
 }
