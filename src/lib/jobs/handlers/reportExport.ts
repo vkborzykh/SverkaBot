@@ -188,7 +188,7 @@ export async function handleReportExport(job: Job): Promise<void> {
     retention_days: retentionDays,
   });
 
-  // ➕ CSV-выгрузка для тарифа «Бизнес»
+  // CSV-выгрузка для тарифа «Бизнес»
   if (csvRequested) {
     try {
       const existingCsv = await findReportByRunIdAndType(runId, 'CSV');
@@ -220,9 +220,6 @@ export async function handleReportExport(job: Job): Promise<void> {
   }
 
   if (user?.telegram_id) {
-    if (lossKopeks > BigInt(0)) {
-      await sendMessageToUser(user.telegram_id, `🔍 Обнаружена недоплата: ${rub(lossKopeks)}. Отчёт отправлен.`);
-    }
     await clearSession(user.telegram_id);
     await sendMessageToUser(user.telegram_id, msg.reconciliationCompleted, reconciliationFinishedKeyboard);
   }
