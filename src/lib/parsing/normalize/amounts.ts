@@ -1,64 +1,62 @@
-// Parses monetary values into integer kopeks (bigint).
-// Supports various decimal separators, thousand separators, currency symbols, negative forms.
+// Locale-tolerant monetary parsing. Returns integer kopeks (bigint), never float.
 
-const CURRENCY_SYMBOLS = /[₽$€¥£]|руб|RUB|USD|EUR/gi;
-// Strips thousands separators (space or non-breaking space) then normalises decimal
-const SPACE_SEP = /[\s\u00A0]/g;
+/**
+ * Parse a raw cell into signed integer kopeks.
+ * Handles: "1234,56", "1 234,56", "1234.56", "1,234.56", "1.234,56",
+ *          "-1234,56", "1234,56-", "(1 234,56)", "1 234 567,89", "1234",
+ *          и числовые ячейки XLSX (561.43).
+ * Returns null when the value is not a number.
+ */
+export function parseAmountToKopeks(raw: unknown): bigint | null {
+  if (raw === null || raw === undefined) return null;
 
-export function normalizeAmount(value: unknown): bigint {
-  if (value === null || value === undefined || value === '') {
-    throw new Error(`Empty amount value`);
+  if (typeof raw === 'number' && Number.isFinite(raw)) return numberToKopeks(raw);
+  if (typeof raw === 'bigint') return raw * 100n; // bare bigint assumed to be rubles
+
+  let s = String(raw).trim();
+  if (s === '' || s === '-' || s === '—' || s === '–') return null;
+
+  // Sign: leading/trailing minus (ASCII/Unicode) or parentheses.
+  let negative = false;
+  if (/^\(.*\)$/.test(s)) { negative = true; s = s.slice(1, -1); }
+  if (/[-\u2212]/.test(s)) negative = true;
+
+  // Keep only digits and separators (strips spaces, NBSP, ₽, letters, signs, parens).
+  s = s.replace(/[^\d.,]/g, '');
+  if (s === '') return null;
+
+  const decPos = Math.max(s.lastIndexOf('.'), s.lastIndexOf(','));
+  let intPart: string;
+  let fracPart: string;
+
+  if (decPos === -1) {
+    intPart = s;
+    fracPart = '';
+  } else {
+    const after = s.slice(decPos + 1);
+    if (/^\d{1,2}$/.test(after)) {
+      // Rightmost separator with 1–2 trailing digits = decimal separator.
+      intPart = s.slice(0, decPos).replace(/[.,]/g, '');
+      fracPart = after;
+    } else {
+      // All separators are thousands groupings → integer amount.
+      intPart = s.replace(/[.,]/g, '');
+      fracPart = '';
+    }
   }
 
-  if (typeof value === 'number') {
-    if (!isFinite(value)) throw new Error(`Non-finite amount: ${value}`);
-    return rubleFloatToKopeks(value);
-  }
+  if (intPart === '') intPart = '0';
+  if (!/^\d+$/.test(intPart)) return null;
 
-  let str = String(value).trim();
-  if (!str) throw new Error(`Empty amount string`);
-
-  // Parentheses → negative: (1234.56) → -1234.56
-  const isParens = /^\((.+)\)$/.test(str);
-  if (isParens) str = `-${str.slice(1, -1)}`;
-
-  // Trailing minus: 1234.56- → -1234.56
-  if (/^[^-].*-$/.test(str)) {
-    str = `-${str.slice(0, -1)}`;
-  }
-
-  // Strip currency symbols
-  str = str.replace(CURRENCY_SYMBOLS, '').trim();
-
-  // Remove thousand separators (spaces) but keep minus and decimal
-  str = str.replace(SPACE_SEP, '');
-
-  // Normalise comma decimal separator → dot
-  // Handle "1.234,56" (European) vs "1,234.56" (US)
-  const commaCount = (str.match(/,/g) || []).length;
-  const dotCount = (str.match(/\./g) || []).length;
-
-  if (commaCount === 1 && dotCount === 0) {
-    // "1234,56" → "1234.56"
-    str = str.replace(',', '.');
-  } else if (commaCount === 1 && dotCount > 0) {
-    // "1.234,56" → "1234.56"
-    str = str.replace(/\./g, '').replace(',', '.');
-  } else if (dotCount > 1) {
-    // "1.234.567" (thousands only)
-    str = str.replace(/\./g, '');
-  }
-  // else single dot is already correct
-
-  str = str.replace(/,/g, ''); // remove any remaining commas (thousands)
-
-  const num = parseFloat(str);
-  if (isNaN(num)) throw new Error(`Cannot parse amount: "${value}"`);
-  return rubleFloatToKopeks(num);
+  fracPart = (fracPart + '00').slice(0, 2);
+  const kopeks = BigInt(intPart) * 100n + BigInt(fracPart);
+  return negative ? -kopeks : kopeks;
 }
 
-function rubleFloatToKopeks(rubles: number): bigint {
-  // Multiply by 100 using string rounding to avoid float precision issues
-  const rounded = Math.round(rubles * 100);
-  return BigInt(rounded);
+/** Convert a float ruble value to kopeks without binary-float drift. */
+function numberToKopeks(value: number): bigint {
+  const negative = value < 0;
+  const [int, frac = '00'] = Math.abs(value).toFixed(2).split('.');
+  const kopeks = BigInt(int) * 100n + BigInt(frac.padEnd(2, '0').slice(0, 2));
+  return negative ? -kopeks : kopeks;
 }
