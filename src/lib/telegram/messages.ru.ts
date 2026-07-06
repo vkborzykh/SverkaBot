@@ -249,4 +249,17 @@ export const msg = {
   dynamicsUpgradeToPro: 'Страница «Динамика» доступна на тарифах «Профи» и «Бизнес». Перейдите на Профи, чтобы видеть сводную аналитику.',
   dynamicsFilterAll: 'Все кабинеты',
   dynamicsCabinetLabel: (name: string): string => `🗂 ${name}`,
+  // ── CSV export (тариф «Бизнес») ─────────────────────────────────────────────
+  csvCaption: 'CSV-выгрузка транзакций по сверке.',
+  csvBusinessOnly:
+    'CSV-выгрузка (для 1С и бухгалтерии) доступна на тарифе «Бизнес».',
+  csvMissingId: 'Укажите ID сверки: /export_csv <id>',
+  csvRunNotFound: 'Сверка не найдена или не принадлежит вашему аккаунту.',
+  csvNotReady: 'Сверка ещё не завершена — CSV будет доступен после её окончания.',
+  csvExpired:
+    'Не удалось подготовить CSV: данные этой сверки уже удалены по сроку хранения.',
+  historyChooseFormat: 'В каком формате прислать отчёт?',
+  historyHtmlButton: '📄 HTML',
+  historyCsvButton: '📊 CSV',
+  historyReportExpired: '🤷‍♂️ Срок хранения этого HTML-отчёта уже истёк.',  
 } as const;
