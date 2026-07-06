@@ -7,13 +7,14 @@ import { findTransactionsByImportId, type CanonicalTransaction } from '@/src/db/
 import { findUserById } from '@/src/db/repositories/users';
 import { findImportById } from '@/src/db/repositories/imports';
 import { findCabinetById } from '@/src/db/repositories/wb-cabinets';
-import { findPrimaryReportByRunId, createReport } from '@/src/db/repositories/reports';
-import { storeReport } from '@/src/lib/ingestion/storage';
+import { findPrimaryReportByRunId, createReport, findReportByRunIdAndType } from '@/src/db/repositories/reports';
+import { storeReport, storeReportCsv } from '@/src/lib/ingestion/storage';
 import { buildHtmlReport, type ClaimRow, type ReportTxRow } from '@/src/lib/reports/htmlReport';
 import { clearSession } from '@/src/lib/telegram/session';
 import { msg } from '@/src/lib/telegram/messages.ru';
 import { reconciliationFinishedKeyboard } from '@/src/lib/telegram/keyboard';
-import { reportRetentionDaysFor } from '@/src/lib/billing/tariffs';
+import { reportRetentionDaysFor, hasBusinessFeatures } from '@/src/lib/billing/tariffs';
+import { buildCsvForRun } from '@/src/lib/reports/csvExport';
 
 const MAX_REPORT_ROWS = 500;
 
@@ -142,10 +143,15 @@ export async function handleReportExport(job: Job): Promise<void> {
     description: tx.description,
   }));
 
+  const csvRequested =
+    Boolean((job.payload as Record<string, unknown>)?.csv_export) ||
+    hasBusinessFeatures(user?.tariff);
+
   const htmlReport = buildHtmlReport({
     runId,
     dateStr: fmtDmy(run.created_at),
     cabinetName,
+    exportCsvCommand: csvRequested ? `/export_csv ${runId}` : null,
     status: aggStatus,
     grossPayoutKopeks,
     commissionsKopeks,
@@ -171,7 +177,7 @@ export async function handleReportExport(job: Job): Promise<void> {
 
   const retentionDays = user?.tariff
     ? reportRetentionDaysFor(user.tariff)
-    : 90; // fallback для TRIAL и неизвестного тарифа
+    : 90;
 
   await createReport({
     run_id: runId,
@@ -181,6 +187,27 @@ export async function handleReportExport(job: Job): Promise<void> {
     is_primary: true,
     retention_days: retentionDays,
   });
+
+  // ➕ CSV-выгрузка для тарифа «Бизнес»
+  if (csvRequested) {
+    try {
+      const existingCsv = await findReportByRunIdAndType(runId, 'CSV');
+      if (!existingCsv) {
+        const csvBuffer = await buildCsvForRun(run);
+        const csvPath = await storeReportCsv(runId, csvBuffer);
+        await createReport({
+          run_id: runId,
+          storage_path: csvPath,
+          export_type: 'CSV',
+          report_version: 1,
+          is_primary: false,
+          retention_days: retentionDays,
+        });
+      }
+    } catch (err) {
+      console.error('[reportExport] CSV generation failed (non-fatal):', err);
+    }
+  }
 
   if (process.env.PUBLIC_URL && process.env.INTERNAL_TOKEN) {
     try {
