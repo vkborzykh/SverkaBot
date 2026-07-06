@@ -83,3 +83,17 @@ export async function deleteDirectory(prefix: string): Promise<void> {
   const { error: rmError } = await supabase.storage.from(STORAGE_BUCKET).remove(paths);
   if (rmError) throw new Error(`Storage delete failed (${prefix}): ${rmError.message}`);
 }
+/** Сохраняет CSV-выгрузку сверки: reports/{runId}/report.csv */
+export async function storeReportCsv(runId: string, buffer: Buffer): Promise<string> {
+  const storagePath = `reports/${runId}/report.csv`;
+  if (isTest()) return storagePath;
+
+  const { error } = await getSupabaseAdmin()
+    .storage.from(STORAGE_BUCKET)
+    .upload(storagePath, buffer, {
+      contentType: 'text/csv; charset=utf-8',
+      upsert: true,
+    });
+  if (error) throw new Error(`Storage upload failed (${storagePath}): ${error.message}`);
+  return storagePath;
+}
