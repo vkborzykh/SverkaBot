@@ -19,14 +19,33 @@ function paywallReply(ctx: Context, text: string) {
   });
 }
 
+/** Проверяет, не исчерпан ли лимит сверок. Возвращает true, если продолжать нельзя. */
+function checkLimitAndReply(user: any, ctx: Context): boolean {
+  const limit = user.subscription_status === 'TRIAL' ? TRIAL_LIMIT : monthlyLimitFor(user.tariff);
+  if (limit === null) return false; // безлимит
+  const used = user.monthly_reconciliations ?? 0;
+  if (used >= limit) {
+    const message = user.subscription_status === 'TRIAL' ? msg.trialLimitReached(limit) : msg.startLimitReached(limit);
+    // Для TRIAL и START ведём на subscribe_inline, чтобы пользователь мог выбрать любой тариф
+    ctx.reply(message, {
+      reply_markup: {
+        inline_keyboard: [[{ text: msg.upgradeToProButton, callback_data: 'subscribe_inline' }]],
+      },
+    });
+    return true;
+  }
+  return false;
+}
+
 export async function handleNewReconciliation(ctx: Context, userId: string): Promise<void> {
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user || checkAccess(user) !== 'full') {
     await paywallReply(ctx, msg.accessExpired);
     return;
   }
+  if (checkLimitAndReply(user, ctx)) return;
 
-  // Если у пользователя больше одного кабинета — выбор кнопками
+  // Мультикабинет
   const cabinets = await findCabinetsByUserId(user.id);
   if (cabinets.length > 1) {
     await setSession(BigInt(ctx.from!.id), 'choosing_cabinet', {});
@@ -40,9 +59,7 @@ export async function handleNewReconciliation(ctx: Context, userId: string): Pro
     return;
   }
 
-  // Один кабинет или ноль
-  const cabinetId = cabinets.length === 1 ? cabinets[0].id : null;
-  const payload = cabinetId ? { cabinet_id: cabinetId } : {};
+  const payload = cabinets.length === 1 ? { cabinet_id: cabinets[0].id } : {};
   await setSession(BigInt(ctx.from!.id), 'reconciliation_active', payload);
   await ctx.reply(msg.newReconciliationPrompt, uploadWbInlineKeyboard);
 }
@@ -53,6 +70,8 @@ export async function handleCabinetPick(ctx: Context, cabinetId: string): Promis
     await paywallReply(ctx, msg.accessExpired);
     return;
   }
+  if (checkLimitAndReply(user, ctx)) return;
+
   const cabinet = await findCabinetById(cabinetId);
   if (!cabinet || cabinet.user_id !== user.id) {
     await ctx.answerCbQuery?.();
@@ -60,7 +79,6 @@ export async function handleCabinetPick(ctx: Context, cabinetId: string): Promis
     return;
   }
   await ctx.answerCbQuery?.();
-  // Обновляем current_cabinet_id у пользователя
   await updateUser(user.id, { current_cabinet_id: cabinetId });
   await setSession(BigInt(ctx.from!.id), 'reconciliation_active', { cabinet_id: cabinet.id });
   await ctx.reply(msg.cabinetSelected(cabinet.name));
@@ -73,6 +91,8 @@ export async function handleUploadWbInline(ctx: Context): Promise<void> {
     await paywallReply(ctx, msg.accessExpired);
     return;
   }
+  if (checkLimitAndReply(user, ctx)) return;
+
   await ctx.answerCbQuery();
   const telegramId = BigInt(ctx.from!.id);
   const payload = await getSessionPayload(telegramId) ?? {};
@@ -86,6 +106,8 @@ export async function handleReplaceWb(ctx: Context): Promise<void> {
     await paywallReply(ctx, msg.accessExpired);
     return;
   }
+  if (checkLimitAndReply(user, ctx)) return;
+
   await ctx.answerCbQuery();
   const telegramId = BigInt(ctx.from!.id);
   const payload = await getSessionPayload(telegramId) ?? {};
@@ -100,6 +122,8 @@ export async function handleUploadBankInline(ctx: Context): Promise<void> {
     await paywallReply(ctx, msg.accessExpired);
     return;
   }
+  if (checkLimitAndReply(user, ctx)) return;
+
   await ctx.answerCbQuery();
   const telegramId = BigInt(ctx.from!.id);
   const payload = await getSessionPayload(telegramId) ?? {};
@@ -113,6 +137,8 @@ export async function handleReplaceBank(ctx: Context): Promise<void> {
     await paywallReply(ctx, msg.accessExpired);
     return;
   }
+  if (checkLimitAndReply(user, ctx)) return;
+
   await ctx.answerCbQuery();
   const telegramId = BigInt(ctx.from!.id);
   const payload = await getSessionPayload(telegramId) ?? {};
@@ -130,6 +156,7 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
 
   const used = user.monthly_reconciliations ?? 0;
 
+  // Проверка лимита для TRIAL
   if (user.subscription_status === 'TRIAL') {
     if (used >= TRIAL_LIMIT) {
       await ctx.reply(msg.trialLimitReached(TRIAL_LIMIT), {
@@ -141,12 +168,13 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
     }
   }
 
+  // Лимит для платных тарифов (только START, т.к. PRO и BUSINESS безлимитны)
   if (user.subscription_status === 'ACTIVE') {
     const limit = monthlyLimitFor(user.tariff);
     if (limit !== null && used >= limit) {
       await ctx.reply(msg.startLimitReached(limit), {
         reply_markup: {
-          inline_keyboard: [[{ text: msg.upgradeToProButton, callback_data: 'tariff_pro' }]],
+          inline_keyboard: [[{ text: msg.upgradeToProButton, callback_data: 'subscribe_inline' }]],
         },
       });
       return;
@@ -173,9 +201,10 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
       return;
     }
     await enqueue('reconcile', result.run_id, { run_id: result.run_id });
-    if (user.subscription_status === 'TRIAL' || (user.subscription_status === 'ACTIVE' && monthlyLimitFor(user.tariff) !== null)) {
-      await updateUser(user.id, { monthly_reconciliations: used + 1 });
-    }
+
+    // Увеличиваем счётчик
+    await updateUser(user.id, { monthly_reconciliations: used + 1 });
+
     if (user.subscription_status === 'TRIAL') {
       const remaining = TRIAL_LIMIT - (used + 1);
       if (remaining > 0) {
