@@ -46,6 +46,8 @@ export async function softDeleteReport(id: string): Promise<Report | undefined> 
     .where(eq(reports.id, id))
     .returning();
   return rows[0];
+}
+
 /** Отчёт конкретного типа по сверке (например, CSV). */
 export async function findReportByRunIdAndType(
   runId: string,
@@ -64,5 +66,4 @@ export async function findReportByRunIdAndType(
     )
     .limit(1);
   return row;
-}  
 }
