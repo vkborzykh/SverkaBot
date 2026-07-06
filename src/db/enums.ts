@@ -64,11 +64,7 @@ export const matchTypeEnum = pgEnum('match_type_enum', [
 ]);
 
 // HTML added (primary format). ZIP kept as a historical artifact.
-export const reportTypeEnum = pgEnum('report_type_enum', [
-  'ZIP',
-  'GOOGLE_SHEETS',
-  'HTML',
-]);
+export const reportTypeEnum = pgEnum('report_type', ['HTML', 'GOOGLE_SHEETS', 'CSV']);
 
 // payment_status enrichment (SUCCEEDED/REFUNDED/CANCELLED) deferred to Phase 4.
 export const paymentStatusEnum = pgEnum('payment_status_enum', [
