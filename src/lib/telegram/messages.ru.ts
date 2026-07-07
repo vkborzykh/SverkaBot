@@ -273,4 +273,15 @@ export const reconciliationVerdicts = {
   notFound:  { title: 'Выплата не найдена',     hint: 'Поступлений от Wildberries за период не обнаружено.' },
   overpaid:  { title: 'Поступило больше ожидаемого',
                hint: 'На счёт поступило больше, чем начислено к перечислению — вероятна корректировка прошлого периода.' },
+  // ── Google Sheets export (тарифы «Профи» и «Бизнес») ────────────────────────
+  sheetsProOnly:
+    'Выгрузка в Google Sheets доступна на тарифах «Профи» и «Бизнес».',
+  sheetsMissingId: 'Укажите ID сверки: /export_sheets <id>',
+  sheetsQueued:
+    '📈 Готовлю Google-таблицу — пришлю ссылку в течение минуты.',
+  sheetsReady: (url: string): string =>
+    `📈 Google-таблица по сверке готова (доступ только на чтение):\n${url}`,
+  sheetsError:
+    'Не удалось создать Google-таблицу. Попробуйте позже или напишите в поддержку: @vBorzykh',
+  historySheetsButton: '📈 Google Sheets',  
 } as const;
