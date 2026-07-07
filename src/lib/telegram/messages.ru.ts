@@ -265,3 +265,12 @@ export const msg = {
   historyCsvButton: '📊 CSV',
   historyReportExpired: '🤷‍♂️ Срок хранения этого HTML-отчёта уже истёк.',
 } as const;
+
+// ── Reconciliation verdicts ─────────────────────────────────────────────────
+export const reconciliationVerdicts = {
+  matched:   { title: 'Расхождений не найдено', hint: 'Сумма поступлений совпала с ожидаемой выплатой.' },
+  underpaid: { title: 'Обнаружена недоплата',   hint: 'Поступило меньше ожидаемого. Проверьте расхождение.' },
+  notFound:  { title: 'Выплата не найдена',     hint: 'Поступлений от Wildberries за период не обнаружено.' },
+  overpaid:  { title: 'Поступило больше ожидаемого',
+               hint: 'На счёт поступило больше, чем начислено к перечислению — вероятна корректировка прошлого периода.' },
+} as const;
