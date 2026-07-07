@@ -264,15 +264,7 @@ export const msg = {
   historyHtmlButton: '📄 HTML',
   historyCsvButton: '📊 CSV',
   historyReportExpired: '🤷‍♂️ Срок хранения этого HTML-отчёта уже истёк.',
-} as const;
 
-// ── Reconciliation verdicts ─────────────────────────────────────────────────
-export const reconciliationVerdicts = {
-  matched:   { title: 'Расхождений не найдено', hint: 'Сумма поступлений совпала с ожидаемой выплатой.' },
-  underpaid: { title: 'Обнаружена недоплата',   hint: 'Поступило меньше ожидаемого. Проверьте расхождение.' },
-  notFound:  { title: 'Выплата не найдена',     hint: 'Поступлений от Wildberries за период не обнаружено.' },
-  overpaid:  { title: 'Поступило больше ожидаемого',
-               hint: 'На счёт поступило больше, чем начислено к перечислению — вероятна корректировка прошлого периода.' },
   // ── Google Sheets export (тарифы «Профи» и «Бизнес») ────────────────────────
   sheetsProOnly:
     'Выгрузка в Google Sheets доступна на тарифах «Профи» и «Бизнес».',
@@ -283,5 +275,14 @@ export const reconciliationVerdicts = {
     `📈 Google-таблица по сверке готова (доступ только на чтение):\n${url}`,
   sheetsError:
     'Не удалось создать Google-таблицу. Попробуйте позже или напишите в поддержку: @vBorzykh',
-  historySheetsButton: '📈 Google Sheets',  
+  historySheetsButton: '📈 Google Sheets',
+} as const;
+
+// ── Reconciliation verdicts ─────────────────────────────────────────────────
+export const reconciliationVerdicts = {
+  matched:   { title: 'Расхождений не найдено', hint: 'Сумма поступлений совпала с ожидаемой выплатой.' },
+  underpaid: { title: 'Обнаружена недоплата',   hint: 'Поступило меньше ожидаемого. Проверьте расхождение.' },
+  notFound:  { title: 'Выплата не найдена',     hint: 'Поступлений от Wildberries за период не обнаружено.' },
+  overpaid:  { title: 'Поступило больше ожидаемого',
+               hint: 'На счёт поступило больше, чем начислено к перечислению — вероятна корректировка прошлого периода.' },
 } as const;
