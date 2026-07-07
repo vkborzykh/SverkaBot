@@ -1,4 +1,4 @@
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, sql } from 'drizzle-orm';
 import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
 import { getDb } from '../index';
 import { reports } from '../schema';
@@ -66,4 +66,24 @@ export async function findReportByRunIdAndType(
     )
     .limit(1);
   return row;
+}
+
+/**
+ * Находит записи reports с указанным export_type,
+ * у которых истёк срок хранения (created_at + retention_days < NOW()).
+ */
+export async function findExpiredReportsByType(
+  exportType: 'HTML' | 'GOOGLE_SHEETS' | 'CSV',
+) {
+  const db = getDb();
+  return db
+    .select()
+    .from(reports)
+    .where(
+      and(
+        eq(reports.export_type, exportType),
+        isNull(reports.deleted_at),
+        sql`${reports.created_at} + make_interval(days => COALESCE(${reports.retention_days}, 180)) < NOW()`,
+      ),
+    );
 }
