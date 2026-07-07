@@ -75,3 +75,20 @@ export const reconciliationFinishedKeyboard = {
     ],
   },
 };
+
+// Клавиатуры для замены файлов (используются в parseWb/parseBank при ошибках)
+export const replaceWbInlineKeyboard = {
+  reply_markup: {
+    inline_keyboard: [
+      [{ text: '🔄 Заменить WB отчёт', callback_data: 'replace_wb' }],
+    ],
+  },
+};
+
+export const replaceBankInlineKeyboard = {
+  reply_markup: {
+    inline_keyboard: [
+      [{ text: '🔄 Заменить выписку', callback_data: 'replace_bank' }],
+    ],
+  },
+};
