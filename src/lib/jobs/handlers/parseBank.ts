@@ -30,6 +30,9 @@ const PARSER_VERSION = 'bank_v2';
 const ROW_LIMIT = 50_000;
 const INSERT_CHUNK = 2000;
 
+// Regex для распознавания балансовых / итоговых строк (остатки, сальдо и т.п.)
+const NON_TX_PURPOSE = /^(входящий\s+остаток|исходящий\s+остаток|оборот|сальдо|всего|итого|balance|opening|closing)/i;
+
 async function notifyUser(telegramId: bigint, text: string): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return;
@@ -198,11 +201,21 @@ export async function handleParseBank(job: Job): Promise<void> {
     const rowNumber = header.headerRowIndex + i + 2;
     const rawFragment = JSON.stringify(row).slice(0, 200);
 
+    // Извлекаем сырые значения даты и назначения для проверки на балансовую строку
     const rawDate = cols.date !== null ? row[cols.date] : null;
+    const rawPurpose = cols.purpose !== null ? row[cols.purpose] : null;
+
+    // Отбрасываем строки остатков / итогов по назначению или если в колонке даты стоит «Исходящий остаток»
+    if ((rawPurpose && NON_TX_PURPOSE.test(rawPurpose)) ||
+        (rawDate && NON_TX_PURPOSE.test(rawDate))) {
+      continue; // балансовая строка, пропускаем без ошибок
+    }
+
     if (!rawDate) {
       errors.push({ import_id: importId, row_number: rowNumber, error_code: 'NO_DATE', error_message: 'No date cell', raw_fragment: rawFragment });
       continue;
     }
+
     let txDate: Date;
     try {
       txDate = normalizeDate(rawDate);
