@@ -1,13 +1,5 @@
-const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
-
-const ALLOWED_TYPES = ['text/csv', 'text/plain', 'application/vnd.ms-excel', 'application/octet-stream'];
-const BANK_STATEMENT_HASH_SIGNATURES = [
-  'выписка', 'выписк', 'платёж', 'платеж', 'операци', 'контрагент',
-  'bank statement', 'transaction', 'statement', 'account activity'
-];
-const HASH_SAMPLE_LINES = 30;
-
 export type CsvDelimiter = ';' | ',' | '\t';
+
 const CANDIDATE_DELIMITERS: CsvDelimiter[] = [';', ',', '\t'];
 
 /** Quote-aware split of one CSV line. */
@@ -61,20 +53,13 @@ export function detectDelimiter(text: string, override?: CsvDelimiter): CsvDelim
   return best.delim;
 }
 
-export function validateExtension(filename: string): boolean {
-  const allowed = ['csv', 'txt', 'xlsx'];
-  const ext = filename.split('.').pop()?.toLowerCase();
-  return ext ? allowed.includes(ext) : false;
+export const MAX_FILE_BYTES = 20 * 1024 * 1024;
+
+export function validateExtension(filename: string, allowed: string[]): boolean {
+  const ext = filename.toLowerCase().split('.').pop();
+  return !!ext && allowed.includes(`.${ext}`);
 }
 
-export function validateFile(file: File): { valid: boolean; error?: string } {
-  if (file.size === 0) return { valid: false, error: 'Файл пуст' };
-  if (file.size > MAX_FILE_SIZE_BYTES) return { valid: false, error: `Файл слишком большой (макс. ${MAX_FILE_SIZE_BYTES / 1024 / 1024} МБ)` };
-  if (!validateExtension(file.name)) return { valid: false, error: 'Неподдерживаемый формат. Загрузите XLSX или CSV.' };
-  return { valid: true };
-}
-
-export function looksLikeBankStatement(text: string): boolean {
-  const head = text.split(/\r?\n/).slice(0, HASH_SAMPLE_LINES).join(' ').toLowerCase();
-  return BANK_STATEMENT_HASH_SIGNATURES.some((sig) => head.includes(sig));
+export function validateFileSize(size: number): boolean {
+  return size <= MAX_FILE_BYTES;
 }
