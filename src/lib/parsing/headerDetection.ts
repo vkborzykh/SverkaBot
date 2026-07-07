@@ -5,16 +5,39 @@ export type BankColumnRole =
   | 'counterparty' | 'inn' | 'purpose' | 'docNumber' | 'currency';
 
 const SYNONYMS: Record<BankColumnRole, RegExp[]> = {
-  date:         [/дата\s*операц/i, /дата\s*документ/i, /дата\s*проводк/i, /дата\s*валютир/i, /дата\s*платеж/i, /^дата$/i, /operation\s*date/i, /^date$/i],
-  valueDate:    [/дата\s*обработк/i, /дата\s*зачислен/i, /дата\s*списан/i],
-  amount:       [/сумма\s*операц/i, /сумма\s*платеж/i, /сумма\s*в\s*валюте/i, /^сумма$/i, /^amount$/i],
-  debit:        [/сумма\s*по\s*дебет/i, /^дебет$/i, /расход/i, /списан/i, /^debit$/i, /outflow/i],
-  credit:       [/сумма\s*по\s*кредит/i, /^кредит$/i, /приход/i, /поступлен/i, /зачислен/i, /^credit$/i, /inflow/i],
-  counterparty: [/контрагент/i, /наименование\s*(получател|плательщик|контрагент)/i, /плательщик/i, /получател/i, /корреспондент/i, /counterparty/i, /payer/i, /payee/i],
-  inn:          [/^инн/i, /tax\s*id/i],
-  purpose:      [/назначен/i, /основани\s*(для\s*)?оплат/i, /^описан/i, /коммент/i, /purpose/i, /description/i, /details/i],
-  docNumber:    [/номер\s*документ/i, /№\s*документ/i, /референс/i, /reference/i, /doc(ument)?\s*(no|number|№)/i],
-  currency:     [/валюта/i, /^currency$/i, /^cur$/i],
+  date: [
+    /дата\s*операц/i, /дата\s*документ/i, /дата\s*проводк/i, /дата\s*валютир/i,
+    /дата\s*платеж/i, /^дата$/i, /operation\s*date/i, /^date$/i,
+    /дата\s*транзакц/i, /дата\s*выписк/i, /дата\s*создан/i,
+  ],
+  valueDate: [/дата\s*обработк/i, /дата\s*зачислен/i, /дата\s*списан/i],
+  amount: [
+    /сумма\s*операц/i, /сумма\s*платеж/i, /сумма\s*в\s*валюте/i,
+    /^сумма$/i, /^amount$/i, /сумма\s*транзакц/i, /сумма\s*по\s*счет/i,
+  ],
+  debit: [
+    /сумма\s*по\s*дебет/i, /^дебет$/i, /расход/i, /списан/i,
+    /^debit$/i, /outflow/i, /сумма\s*списан/i,
+  ],
+  credit: [
+    /сумма\s*по\s*кредит/i, /^кредит$/i, /приход/i, /поступлен/i,
+    /зачислен/i, /^credit$/i, /inflow/i, /сумма\s*поступлен/i,
+  ],
+  counterparty: [
+    /контрагент/i, /наименование\s*(получател|плательщик|контрагент)/i,
+    /плательщик/i, /получател/i, /корреспондент/i, /counterparty/i,
+    /payer/i, /payee/i, /организац/i, /клиент/i,
+  ],
+  inn: [/^инн/i, /tax\s*id/i, /инн\s*(контрагент|плательщик|получател)/i],
+  purpose: [
+    /назначен/i, /основани\s*(для\s*)?оплат/i, /^описан/i, /коммент/i,
+    /purpose/i, /description/i, /details/i, /наименование\s*платеж/i,
+  ],
+  docNumber: [
+    /номер\s*документ/i, /№\s*документ/i, /референс/i, /reference/i,
+    /doc(ument)?\s*(no|number|№)/i, /^№$/i,
+  ],
+  currency: [/валюта/i, /^currency$/i, /^cur$/i],
 };
 
 export interface ResolvedColumns {
@@ -60,7 +83,10 @@ export function detectHeader(rows: string[][], maxScan = 25): HeaderDetectionRes
     const { score, roles } = scoreRow(rows[i] ?? []);
     const hasDate = roles.has('date');
     const hasMoney = roles.has('amount') || roles.has('debit') || roles.has('credit');
-    if (hasDate && hasMoney && score > best.score) best = { index: i, score, roles };
+    // Additional: row must have at least 3 recognised roles to be considered a header
+    if (hasDate && hasMoney && score >= 3 && score > best.score) {
+      best = { index: i, score, roles };
+    }
   }
 
   const columns: ResolvedColumns = {
