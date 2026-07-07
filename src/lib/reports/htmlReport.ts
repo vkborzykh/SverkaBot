@@ -41,6 +41,7 @@ export interface HtmlReportData {
   claimAmountKopeks: bigint;
   claimPeriod: string;
   claimRows: ClaimRow[];
+  exportCsvCommand?: string | null;
 }
 
 function rub(kopeks: bigint): string {
@@ -137,27 +138,36 @@ export function buildHtmlReport(data: HtmlReportData): string {
   const expW = Math.round((exp / scale) * 100);
   const recW = Math.round((rec / scale) * 100);
   const lossW = Math.max(0, expW - recW);
-  const hasLoss = data.lossKopeks > BigInt(0);
+
+  const isOverpaid = data.status === 'overpaid';
+  const overpaymentKopeks = isOverpaid ? data.receivedKopeks - data.expectedKopeks : BigInt(0);
+  const hasLoss = !isOverpaid && data.lossKopeks > BigInt(0);
 
   const hero = `
     <div class="hero">
-      <div class="k">${hasLoss ? 'Неподтверждённые выплаты' : 'Итог сверки'}</div>
-      <div class="v">${hasLoss ? rub(data.lossKopeks) : 'Расхождений нет'}</div>
+      <div class="k">${isOverpaid ? 'Переплата' : (hasLoss ? 'Неподтверждённые выплаты' : 'Итог сверки')}</div>
+      <div class="v">${isOverpaid ? rub(overpaymentKopeks) : (hasLoss ? rub(data.lossKopeks) : 'Расхождений нет')}</div>
       <div class="sub">${
-        hasLoss
-          ? `${data.lossPercent != null ? data.lossPercent.toFixed(1) + '% от ожидаемого · ' : ''}ожидалось ${rub(data.expectedKopeks)}, поступило ${rub(data.receivedKopeks)}`
-          : `поступило ${rub(data.receivedKopeks)} из ${rub(data.expectedKopeks)} ожидаемых`
+        isOverpaid
+          ? `Поступило больше ожидаемого на ${rub(overpaymentKopeks)}.`
+          : (hasLoss
+            ? `${data.lossPercent != null ? data.lossPercent.toFixed(1) + '% от ожидаемого · ' : ''}ожидалось ${rub(data.expectedKopeks)}, поступило ${rub(data.receivedKopeks)}`
+            : `поступило ${rub(data.receivedKopeks)} из ${rub(data.expectedKopeks)} ожидаемых`)
       }</div>
     </div>`;
 
   const breakdown = `
     <h2>Как получена сумма</h2>
     <table class="flow"><tbody>
-      <tr><td>Валовые выплаты Wildberries</td><td class="num">${rub(data.grossPayoutKopeks)}</td></tr>
-      <tr><td>− Удержания и комиссии WB</td><td class="num">−${rub(data.commissionsKopeks)}</td></tr>
+      <tr><td>Выплаты за продажи (за вычетом комиссии WB)</td><td class="num">${rub(data.grossPayoutKopeks)}</td></tr>
+      <tr><td>− Возвраты</td><td class="num">−${rub(data.commissionsKopeks)}</td></tr>
       <tr class="sum"><td>Ожидалось к перечислению</td><td class="num">${rub(data.expectedKopeks)}</td></tr>
       <tr><td>Поступило на счёт</td><td class="num">${rub(data.receivedKopeks)}</td></tr>
-      <tr class="gap"><td>Расхождение${data.lossPercent != null ? ` (${data.lossPercent.toFixed(1)}%)` : ''}</td><td class="num">${rub(data.lossKopeks)}</td></tr>
+      <tr class="gap"><td>${
+        isOverpaid
+          ? 'Переплата (в вашу пользу)'
+          : `Расхождение${data.lossPercent != null ? ` (${data.lossPercent.toFixed(1)}%)` : ''}`
+      }</td><td class="num">${rub(isOverpaid ? overpaymentKopeks : data.lossKopeks)}</td></tr>
     </tbody></table>`;
 
   const wbTableHtml = buildTable(data.wbRows, data.wbRowsTotal, 'wb');
@@ -211,7 +221,9 @@ export function buildHtmlReport(data: HtmlReportData): string {
     ${wrappedClaimTable}
     <p class="disclaimer">Это шаблон, а не юридически выверенная претензия. Проверьте формулировки и цифры перед отправкой на маркетплейс.</p>`;
   } else {
-    claimSection = `<h2>Данные для претензии</h2><p class="muted">Все выплаты подтверждены. Данные для претензии отсутствуют.</p>`;
+    claimSection = `<h2>Данные для претензии</h2><p class="muted">${
+      isOverpaid ? 'Переплата – претензия не требуется.' : 'Все выплаты подтверждены. Данные для претензии отсутствуют.'
+    }</p>`;
   }
 
   const whatToDo = hasLoss ? WHAT_TO_DO_HTML : '';
