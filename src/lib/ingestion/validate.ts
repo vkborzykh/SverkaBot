@@ -61,11 +61,16 @@ export function detectDelimiter(text: string, override?: CsvDelimiter): CsvDelim
   return best.delim;
 }
 
+export function validateExtension(filename: string): boolean {
+  const allowed = ['csv', 'txt', 'xlsx'];
+  const ext = filename.split('.').pop()?.toLowerCase();
+  return ext ? allowed.includes(ext) : false;
+}
+
 export function validateFile(file: File): { valid: boolean; error?: string } {
   if (file.size === 0) return { valid: false, error: 'Файл пуст' };
   if (file.size > MAX_FILE_SIZE_BYTES) return { valid: false, error: `Файл слишком большой (макс. ${MAX_FILE_SIZE_BYTES / 1024 / 1024} МБ)` };
-  const ext = file.name.split('.').pop()?.toLowerCase();
-  if (!ext || !['csv', 'txt'].includes(ext)) return { valid: false, error: 'Поддерживаются только CSV / TXT файлы' };
+  if (!validateExtension(file.name)) return { valid: false, error: 'Неподдерживаемый формат. Загрузите XLSX или CSV.' };
   return { valid: true };
 }
 
