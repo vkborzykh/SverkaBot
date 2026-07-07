@@ -5,6 +5,7 @@ export type JobType =
   | 'parse_bank'
   | 'reconcile'
   | 'report_export'
+  | 'generate_google_sheet'
   | 'subscription_reminder'
   | 'inactivity_reminder'
   | 'file_cleanup';
