@@ -4,7 +4,7 @@ import { findCabinetsByUserId } from '@/src/db/repositories/wb-cabinets';
 import { findPrimaryReportByRunId } from '@/src/db/repositories/reports';
 import { loadFile } from '@/src/lib/ingestion/storage';
 import { msg } from '@/src/lib/telegram/messages.ru';
-import { hasBusinessFeatures } from '@/src/lib/billing/tariffs';
+import { hasProFeatures, hasBusinessFeatures } from '@/src/lib/billing/tariffs';
 import type { BotContext } from '@/src/lib/telegram/router';
 
 function fmtDate(d: string | Date): string {
@@ -127,23 +127,28 @@ async function checkRunOwnership(ctx: BotContext, runId: string) {
   return user;
 }
 
-/** Нажатие на сверку в истории: BUSINESS → выбор формата, остальные → HTML. */
+/** Нажатие на сверку в истории: выбор формата в зависимости от тарифа. */
 export async function handleHistoryReport(ctx: BotContext, runId: string): Promise<void> {
   await ctx.answerCbQuery?.();
   const user = await checkRunOwnership(ctx, runId);
   if (!user) return;
 
-  if (hasBusinessFeatures(user.tariff)) {
+  if (hasProFeatures(user.tariff)) {
+    // PRO и BUSINESS: предлагаем HTML, Sheets и CSV (только для BUSINESS)
+    const row: { text: string; callback_data: string }[] = [
+      { text: msg.historyHtmlButton, callback_data: `history_html:${runId}` },
+    ];
+    if (hasBusinessFeatures(user.tariff)) {
+      row.push({ text: msg.historyCsvButton, callback_data: `history_csv:${runId}` });
+    }
+    row.push({ text: msg.historySheetsButton, callback_data: `history_sheets:${runId}` });
     await ctx.reply(msg.historyChooseFormat, {
-      reply_markup: {
-        inline_keyboard: [[
-          { text: msg.historyHtmlButton, callback_data: `history_html:${runId}` },
-          { text: msg.historyCsvButton, callback_data: `history_csv:${runId}` },
-        ]],
-      },
+      reply_markup: { inline_keyboard: [row] },
     });
     return;
   }
+
+  // START: сразу HTML
   if (!user.telegram_id) return;
   await sendHtmlForRun(ctx, user.telegram_id, runId);
 }
