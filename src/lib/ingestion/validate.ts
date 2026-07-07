@@ -1,8 +1,16 @@
-export type CsvDelimiter = ';' | ',' | '\t';
+import { MAX_FILE_SIZE_BYTES } from '$lib/config';
 
+const ALLOWED_TYPES = ['text/csv', 'text/plain', 'application/vnd.ms-excel', 'application/octet-stream'];
+const BANK_STATEMENT_HASH_SIGNATURES = [
+  'выписка', 'выписк', 'платёж', 'платеж', 'операци', 'контрагент',
+  'bank statement', 'transaction', 'statement', 'account activity'
+];
+const HASH_SAMPLE_LINES = 30;
+
+export type CsvDelimiter = ';' | ',' | '\t';
 const CANDIDATE_DELIMITERS: CsvDelimiter[] = [';', ',', '\t'];
 
-/** Quote-aware split of a single CSV line (used for counting and parsing). */
+/** Quote-aware split of one CSV line. */
 export function splitCsvLine(line: string, delimiter: CsvDelimiter): string[] {
   const out: string[] = [];
   let cur = '';
@@ -21,40 +29,47 @@ export function splitCsvLine(line: string, delimiter: CsvDelimiter): string[] {
 }
 
 /**
- * Detect the delimiter by column-count consistency across sampled lines.
- * Robust against comma-decimal numbers ("1234,56") that fool naive detectors
- * into choosing ',' on a TAB/semicolon file.
+ * Detect delimiter by column-count consistency AND width.
+ * Fix: the score must reward the number of columns, not only agreement.
+ * A file like VTB ("1 234,56" decimal comma + a 5-row preamble) otherwise makes
+ * ',' win with a perfectly-consistent-but-degenerate 2-column split, shredding
+ * every row. `modalCols * agreement` makes the real ';' (10 columns) win.
  */
 export function detectDelimiter(text: string, override?: CsvDelimiter): CsvDelimiter {
   if (override) return override;
 
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(0, 40);
   if (lines.length === 0) return ';';
+  const total = lines.length;
 
   let best = { delim: ';' as CsvDelimiter, score: -1 };
   for (const delim of CANDIDATE_DELIMITERS) {
-    const counts = lines.map((l) => splitCsvLine(l, delim).length).filter((c) => c >= 2);
-    if (counts.length === 0) continue;
-
     const freq = new Map<number, number>();
-    for (const c of counts) freq.set(c, (freq.get(c) ?? 0) + 1);
-    let modalCols = 1, modalHits = 0;
-    for (const [c, hits] of freq) {
-      if (hits > modalHits || (hits === modalHits && c > modalCols)) { modalHits = hits; modalCols = c; }
+    for (const line of lines) {
+      const cols = splitCsvLine(line, delim).length;
+      if (cols >= 2) freq.set(cols, (freq.get(cols) ?? 0) + 1);
     }
-    const score = (modalHits / counts.length) * 100 + modalCols;
-    if (modalCols >= 2 && score > best.score) best = { delim, score };
+    if (freq.size === 0) continue;
+
+    let modalCols = 0, modalHits = 0;
+    for (const [cols, hits] of freq) {
+      if (hits > modalHits || (hits === modalHits && cols > modalCols)) { modalHits = hits; modalCols = cols; }
+    }
+    const score = modalCols * (modalHits / total);
+    if (score > best.score) best = { delim, score };
   }
   return best.delim;
 }
 
-export const MAX_FILE_BYTES = 20 * 1024 * 1024;
-
-export function validateExtension(filename: string, allowed: string[]): boolean {
-  const ext = filename.toLowerCase().split('.').pop();
-  return !!ext && allowed.includes(`.${ext}`);
+export function validateFile(file: File): { valid: boolean; error?: string } {
+  if (file.size === 0) return { valid: false, error: 'Файл пуст' };
+  if (file.size > MAX_FILE_SIZE_BYTES) return { valid: false, error: `Файл слишком большой (макс. ${MAX_FILE_SIZE_BYTES / 1024 / 1024} МБ)` };
+  const ext = file.name.split('.').pop()?.toLowerCase();
+  if (!ext || !['csv', 'txt'].includes(ext)) return { valid: false, error: 'Поддерживаются только CSV / TXT файлы' };
+  return { valid: true };
 }
 
-export function validateFileSize(size: number): boolean {
-  return size <= MAX_FILE_BYTES;
+export function looksLikeBankStatement(text: string): boolean {
+  const head = text.split(/\r?\n/).slice(0, HASH_SAMPLE_LINES).join(' ').toLowerCase();
+  return BANK_STATEMENT_HASH_SIGNATURES.some((sig) => head.includes(sig));
 }
