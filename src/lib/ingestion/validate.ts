@@ -1,4 +1,4 @@
-import { MAX_FILE_SIZE_BYTES } from '$lib/config';
+const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 
 const ALLOWED_TYPES = ['text/csv', 'text/plain', 'application/vnd.ms-excel', 'application/octet-stream'];
 const BANK_STATEMENT_HASH_SIGNATURES = [
