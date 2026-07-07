@@ -60,3 +60,13 @@ function numberToKopeks(value: number): bigint {
   const kopeks = BigInt(int) * 100n + BigInt(frac.padEnd(2, '0').slice(0, 2));
   return negative ? -kopeks : kopeks;
 }
+
+/**
+ * Parse amount and throw on invalid input.
+ * Used by WB parser (parseWb.ts).
+ */
+export function normalizeAmount(raw: unknown): bigint {
+  const kopeks = parseAmountToKopeks(raw);
+  if (kopeks === null) throw new Error(`Cannot normalize amount: ${String(raw)}`);
+  return kopeks;
+}
