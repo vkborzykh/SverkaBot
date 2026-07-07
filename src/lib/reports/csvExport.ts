@@ -87,11 +87,14 @@ function fmtDmy(d: Date | string | null | undefined): string {
   return `${p(dt.getDate())}.${p(dt.getMonth() + 1)}.${dt.getFullYear()}`;
 }
 
-/** Собирает CSV по завершённой сверке из канонических данных. */
-export async function buildCsvForRun(run: {
+/**
+ * Собирает массив строк транзакций WB со статусами сверки и кабинетом.
+ * Используется как для CSV-выгрузки, так и для экспорта в Google Sheets.
+ */
+export async function collectWbCsvRows(run: {
   id: string;
   wb_import_id: string;
-}): Promise<Buffer> {
+}): Promise<WbCsvRow[]> {
   const [wbTxs, matches] = await Promise.all([
     findTransactionsByImportId(run.wb_import_id),
     findMatchesByRunId(run.id),
@@ -122,7 +125,7 @@ export async function buildCsvForRun(run: {
     return ta - tb;
   });
 
-  const rows: WbCsvRow[] = sorted.map((tx) => ({
+  return sorted.map((tx) => ({
     dateStr: fmtDmy(tx.transaction_date),
     type: rowType(tx),
     amountKopeks: tx.amount_kopeks ?? BigInt(0),
@@ -131,6 +134,13 @@ export async function buildCsvForRun(run: {
     cabinetName,
     matchStatus: matchStatusRu(statusByWbTx.get(tx.id)),
   }));
+}
 
+/** Собирает CSV по завершённой сверке из канонических данных. */
+export async function buildCsvForRun(run: {
+  id: string;
+  wb_import_id: string;
+}): Promise<Buffer> {
+  const rows = await collectWbCsvRows(run);
   return buildWbTransactionsCsv(rows);
 }
