@@ -227,13 +227,6 @@ export function buildHtmlReport(data: HtmlReportData): string {
   }
 
   const whatToDo = hasLoss ? WHAT_TO_DO_HTML : '';
-  const csvBlock = data.exportCsvCommand
-    ? `
-<h2>CSV для 1С и бухгалтерии</h2>
-<p class="muted">Отправьте боту команду ниже — придёт файл с транзакциями этой сверки (тариф «Бизнес»):</p>
-<div class="tmpl"><div class="tmpl-b">${esc(data.exportCsvCommand!)}</div></div>
-<a class="btn" href="https://t.me/SverkaProBot" target="_blank" rel="noopener">Открыть бота</a>`
-    : '';  
 
   return `<!doctype html>
 <html lang="ru">
