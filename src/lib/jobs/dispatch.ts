@@ -7,7 +7,7 @@ import { handleParseWb } from './handlers/parseWb';
 import { handleParseBank } from './handlers/parseBank';
 import { handleReconcile } from './handlers/reconcile';
 import { handleReportExport } from './handlers/reportExport';
-import { handleGenerateGoogleSheet } from './handlers/generateGoogleSheet';
+import { handleGenerateXlsx } from './handlers/generateXlsx';
 import { handleSubscriptionReminder } from './handlers/subscriptionReminder';
 import { handleInactivityReminder } from './handlers/inactivityReminder';
 import { handleFileCleanup } from './handlers/fileCleanup';
@@ -22,8 +22,8 @@ export function dispatch(job: Job): Promise<void> {
       return handleReconcile(job);
     case 'report_export':
       return handleReportExport(job);
-    case 'generate_google_sheet':
-      return handleGenerateGoogleSheet(job);
+    case 'generate_xlsx':
+      return handleGenerateXlsx(job);
     case 'subscription_reminder':
       return handleSubscriptionReminder(job);
     case 'inactivity_reminder':
