@@ -366,8 +366,6 @@ export function buildHtmlReport(data: HtmlReportData): string {
 
     ${unidentified}
 
-    ${csvBlock}
-
     ${claimSection}
 
     ${whatToDo}
