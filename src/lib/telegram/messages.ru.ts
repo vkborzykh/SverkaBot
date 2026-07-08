@@ -77,8 +77,14 @@ export const msg = {
   subscribeActiveGreeting: (expiryDate: string): string =>
     `Ваша подписка активна до ${expiryDate}.`,
   subscribeReminderExpiry: 'Ваша подписка закончится через 3 дня. Продлите, чтобы не потерять доступ: /subscribe',
-  subscribeReminderInactivity:
-    'Давно не сверяли выплаты? Загрузите свежие отчёты и проверьте, все ли средства поступили.',
+  subscribeReminderInactivity: 'Давно не сверяли выплаты? Загрузите свежие отчёты и проверьте, все ли средства поступили.',
+  subscriptionStatusTrialActive: (date: string) => `Текущий статус: пробный период активен до ${date}.`,
+  subscriptionStatusTrialExpired: 'Текущий статус: пробный период завершён.',
+  subscriptionStatusTariffStart: (date: string) => `Текущий статус: подключен тариф «Старт» (до ${date}).`,
+  subscriptionStatusTariffPro: (date: string) => `Текущий статус: подключен тариф «Профи» (до ${date}).`,
+  subscriptionStatusTariffBusiness: (date: string) => `Текущий статус: подключен тариф «Бизнес» (до ${date}).`,
+  tariffAlreadyActive: 'Этот тариф уже подключен.',
+  chooseTariffPrompt: 'Выберите тариф:',
 
   // ── Sync status command ─────────────────────────────────────────────────────
   syncStatusMissingId: 'Укажите ID сверки: /sync_status <id>',
