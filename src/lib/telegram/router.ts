@@ -9,7 +9,7 @@ import {
   handleBankFileReceived,
   type DocumentInfo,
 } from './handlers/upload';
-import { handleHistory, handleHistoryReport, handleHistoryHtml } from './handlers/history';
+import { handleHistory, handleHistoryReport, handleHistoryHtml, handleDownloadWb, handleDownloadBank } from './handlers/history';
 import { handleStatus } from './handlers/status';
 import { handleGetReport } from './handlers/getReport';
 import { handleHelp } from './handlers/stubs';
@@ -43,8 +43,6 @@ import {
   handleCabinetUse,
 } from './handlers/myCabinets';
 import { handleDynamics, handleDynamicsFilter } from './handlers/dynamics';
-import { handleExportCsv, sendCsvForRun } from './handlers/exportCsv';
-import { handleExportXlsx, sendXlsxForRun } from './handlers/exportXlsx';
 import { TARIFF_BY_AMOUNT_KOPEKS } from '@/src/lib/billing/tariffs';
 import { msg } from './messages.ru';
 
@@ -74,17 +72,12 @@ export async function routeUpdate(
 ): Promise<void> {
   const ctx = buildCtx(update);
 
-  // ── Telegram Payments: pre-checkout query ─────────────────────────────────
   if ('pre_checkout_query' in update && update.pre_checkout_query) {
     const pq = update.pre_checkout_query;
-    await ctx.answerPreCheckoutQuery({
-      pre_checkout_query_id: pq.id,
-      ok: true,
-    });
+    await ctx.answerPreCheckoutQuery({ pre_checkout_query_id: pq.id, ok: true });
     return;
   }
 
-  // ── Telegram Payments: successful payment ─────────────────────────────────
   if ('message' in update && update.message && 'successful_payment' in update.message) {
     const sp = update.message.successful_payment;
     const telegramId = BigInt(update.message.chat.id);
@@ -105,9 +98,7 @@ export async function routeUpdate(
         const { activateSubscription } = await import('@/src/lib/billing/subscription');
         const endDate = await activateSubscription(user.id, 30);
 
-        if (tariff) {
-          await updateUser(user.id, { tariff, monthly_reconciliations: 0 });
-        }
+        if (tariff) await updateUser(user.id, { tariff, monthly_reconciliations: 0 });
 
         let referralBonusGranted = false;
         if (user.invited_by) {
@@ -163,11 +154,7 @@ export async function routeUpdate(
     const sessionState = await getSession(telegramId);
 
     if ('document' in message && message.document) {
-      const doc = message.document as {
-        file_id: string;
-        file_name?: string;
-        file_size?: number;
-      };
+      const doc = message.document as { file_id: string; file_name?: string; file_size?: number };
       const docInfo: DocumentInfo = {
         fileId: doc.file_id,
         fileName: doc.file_name ?? 'file',
@@ -219,47 +206,25 @@ export async function routeUpdate(
     }
 
     const ADMIN_COMMANDS = new Set([
-      'view_profiles',
-      'activate_profile',
-      'deprecate_profile',
-      'view_errors',
-      'stats',
-      'retry_export',
+      'view_profiles', 'activate_profile', 'deprecate_profile',
+      'view_errors', 'stats', 'retry_export',
     ]);
 
     if (ADMIN_COMMANDS.has(command)) {
-      if (!isAdmin(telegramId)) {
-        await ctx.reply(msg.adminNotAuthorized);
-        return;
-      }
+      if (!isAdmin(telegramId)) { await ctx.reply(msg.adminNotAuthorized); return; }
       switch (command) {
-        case 'view_profiles':
-          await handleViewProfiles(ctx as Parameters<typeof handleViewProfiles>[0]);
-          break;
-        case 'activate_profile':
-          await handleActivateProfile(ctx as Parameters<typeof handleActivateProfile>[0]);
-          break;
-        case 'deprecate_profile':
-          await handleDeprecateProfile(ctx as Parameters<typeof handleDeprecateProfile>[0]);
-          break;
-        case 'view_errors':
-          await handleViewErrors(ctx as Parameters<typeof handleViewErrors>[0]);
-          break;
-        case 'stats':
-          await handleStats(ctx as Parameters<typeof handleStats>[0]);
-          break;
-        case 'retry_export':
-          await handleRetryExport(ctx as Parameters<typeof handleRetryExport>[0]);
-          break;
+        case 'view_profiles': await handleViewProfiles(ctx as Parameters<typeof handleViewProfiles>[0]); break;
+        case 'activate_profile': await handleActivateProfile(ctx as Parameters<typeof handleActivateProfile>[0]); break;
+        case 'deprecate_profile': await handleDeprecateProfile(ctx as Parameters<typeof handleDeprecateProfile>[0]); break;
+        case 'view_errors': await handleViewErrors(ctx as Parameters<typeof handleViewErrors>[0]); break;
+        case 'stats': await handleStats(ctx as Parameters<typeof handleStats>[0]); break;
+        case 'retry_export': await handleRetryExport(ctx as Parameters<typeof handleRetryExport>[0]); break;
       }
       return;
     }
 
     const user = await findUserByTelegramId(telegramId);
-    if (!user) {
-      await handleStart(ctx as Parameters<typeof handleStart>[0]);
-      return;
-    }
+    if (!user) { await handleStart(ctx as Parameters<typeof handleStart>[0]); return; }
 
     const access = checkAccess(user);
     if (access !== 'full' && PROTECTED_COMMANDS.has(command)) {
@@ -268,58 +233,22 @@ export async function routeUpdate(
     }
 
     switch (command) {
-      case 'new_reconciliation':
-        await handleNewReconciliation(ctx as Parameters<typeof handleNewReconciliation>[0], user.id);
-        break;
-      case 'subscribe':
-        await handleSubscribe(ctx as any);
-        break;
-      case 'referral':
-        await handleReferral(ctx as any);
-        break;
-      case 'my_cabinets':
-        await handleMyCabinets(ctx as any);
-        break;
-      case 'dynamics':
-        await handleDynamics(ctx as any);
-        break;
-      case 'export_csv':
-        await handleExportCsv(ctx as any);
-        break;
-      case 'export_xlsx':
-        await handleExportXlsx(ctx as any);
-        break;
-      case 'help':
-        await handleHelp(ctx as Parameters<typeof handleHelp>[0]);
-        break;
-      case 'history':
-        await handleHistory(ctx as Parameters<typeof handleHistory>[0]);
-        break;
-      case 'delete_my_data':
-        await handleDeleteMyData(ctx as Parameters<typeof handleDeleteMyData>[0]);
-        break;
-      case 'get_report':
-        await handleGetReport(ctx as Parameters<typeof handleGetReport>[0]);
-        break;
-      case 'status':
-        await handleStatus(ctx as Parameters<typeof handleStatus>[0]);
-        break;
-      case 'sync_status':
-        await import('./handlers/syncStatus').then(m => m.handleSyncStatus(ctx as any));
-        break;
-      case 'retry_import':
-        await handleRetryImport(ctx as Parameters<typeof handleRetryImport>[0]);
-        break;
-      case 'cancel':
-        await handleCancel(ctx as Parameters<typeof handleCancel>[0]);
-        break;
-      case 'upload_wb':
-      case 'upload_bank':
-      case 'run_sync':
-        await ctx.reply('Используйте кнопки в чате для выполнения этой операции.');
-        break;
-      default:
-        break;
+      case 'new_reconciliation': await handleNewReconciliation(ctx as Parameters<typeof handleNewReconciliation>[0], user.id); break;
+      case 'subscribe': await handleSubscribe(ctx as any); break;
+      case 'referral': await handleReferral(ctx as any); break;
+      case 'my_cabinets': await handleMyCabinets(ctx as any); break;
+      case 'dynamics': await handleDynamics(ctx as any); break;
+      case 'help': await handleHelp(ctx as Parameters<typeof handleHelp>[0]); break;
+      case 'history': await handleHistory(ctx as Parameters<typeof handleHistory>[0]); break;
+      case 'delete_my_data': await handleDeleteMyData(ctx as Parameters<typeof handleDeleteMyData>[0]); break;
+      case 'get_report': await handleGetReport(ctx as Parameters<typeof handleGetReport>[0]); break;
+      case 'status': await handleStatus(ctx as Parameters<typeof handleStatus>[0]); break;
+      case 'sync_status': await import('./handlers/syncStatus').then(m => m.handleSyncStatus(ctx as any)); break;
+      case 'retry_import': await handleRetryImport(ctx as Parameters<typeof handleRetryImport>[0]); break;
+      case 'cancel': await handleCancel(ctx as Parameters<typeof handleCancel>[0]); break;
+      case 'upload_wb': case 'upload_bank': case 'run_sync':
+        await ctx.reply('Используйте кнопки в чате для выполнения этой операции.'); break;
+      default: break;
     }
   }
 
@@ -352,12 +281,12 @@ export async function routeUpdate(
       await handleHistoryHtml(ctx as any, data.slice('history_html:'.length));
       return;
     }
-    if (data.startsWith('history_csv:')) {
-      await sendCsvForRun(ctx as any, data.slice('history_csv:'.length));
+    if (data.startsWith('download_wb:')) {
+      await handleDownloadWb(ctx as any, data.slice('download_wb:'.length));
       return;
     }
-    if (data.startsWith('history_xlsx:')) {
-      await sendXlsxForRun(ctx as any, data.slice('history_xlsx:'.length));
+    if (data.startsWith('download_bank:')) {
+      await handleDownloadBank(ctx as any, data.slice('download_bank:'.length));
       return;
     }
     if (data === 'dynamics_all') {
@@ -366,56 +295,26 @@ export async function routeUpdate(
     }
 
     switch (data) {
-      case 'cabinet_add':
-        await handleCabinetAdd(ctx as any);
-        break;
-      case 'my_cabinets':
-        await handleMyCabinets(ctx as any);
-        break;
-      case 'tariff_start':
-        await import('./handlers/subscribe').then(m => m.handleTariffStart(ctx as any));
-        break;
-      case 'tariff_pro':
-        await import('./handlers/subscribe').then(m => m.handleTariffPro(ctx as any));
-        break;
-      case 'tariff_business':
-        await import('./handlers/subscribe').then(m => m.handleTariffBusiness(ctx as any));
-        break;
-      case 'consent:accept':
-        await handleConsentAccept(ctx as Parameters<typeof handleConsentAccept>[0]);
-        break;
-      case 'consent:decline':
-        await handleConsentDecline(ctx as Parameters<typeof handleConsentDecline>[0]);
-        break;
-      case 'delete:confirm':
-        await handleDeleteConfirm(ctx as Parameters<typeof handleDeleteConfirm>[0]);
-        break;
-      case 'delete:cancel':
-        await handleDeleteCancel(ctx as Parameters<typeof handleDeleteCancel>[0]);
-        break;
+      case 'cabinet_add': await handleCabinetAdd(ctx as any); break;
+      case 'my_cabinets': await handleMyCabinets(ctx as any); break;
+      case 'tariff_start': await import('./handlers/subscribe').then(m => m.handleTariffStart(ctx as any)); break;
+      case 'tariff_pro': await import('./handlers/subscribe').then(m => m.handleTariffPro(ctx as any)); break;
+      case 'tariff_business': await import('./handlers/subscribe').then(m => m.handleTariffBusiness(ctx as any)); break;
+      case 'consent:accept': await handleConsentAccept(ctx as Parameters<typeof handleConsentAccept>[0]); break;
+      case 'consent:decline': await handleConsentDecline(ctx as Parameters<typeof handleConsentDecline>[0]); break;
+      case 'delete:confirm': await handleDeleteConfirm(ctx as Parameters<typeof handleDeleteConfirm>[0]); break;
+      case 'delete:cancel': await handleDeleteCancel(ctx as Parameters<typeof handleDeleteCancel>[0]); break;
       case 'new_reconciliation': {
         const user = await findUserByTelegramId(BigInt(ctx.from!.id));
         if (user) await handleNewReconciliation(ctx as any, user.id);
         break;
       }
-      case 'upload_wb_inline':
-        await handleUploadWbInline(ctx as any);
-        break;
-      case 'replace_wb':
-        await handleReplaceWb(ctx as any);
-        break;
-      case 'upload_bank_inline':
-        await handleUploadBankInline(ctx as any);
-        break;
-      case 'replace_bank':
-        await handleReplaceBank(ctx as any);
-        break;
-      case 'run_sync_inline':
-        await handleRunSyncInline(ctx as any);
-        break;
-      case 'subscribe_inline':
-        await handleSubscribe(ctx as any);
-        break;
+      case 'upload_wb_inline': await handleUploadWbInline(ctx as any); break;
+      case 'replace_wb': await handleReplaceWb(ctx as any); break;
+      case 'upload_bank_inline': await handleUploadBankInline(ctx as any); break;
+      case 'replace_bank': await handleReplaceBank(ctx as any); break;
+      case 'run_sync_inline': await handleRunSyncInline(ctx as any); break;
+      case 'subscribe_inline': await handleSubscribe(ctx as any); break;
     }
   }
 }
