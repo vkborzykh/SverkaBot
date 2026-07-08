@@ -13,7 +13,6 @@ function fmtDate(d: string | Date): string {
   return `${p(dt.getDate())}.${p(dt.getMonth() + 1)}.${dt.getFullYear()}`;
 }
 
-/** Отправляет список сверок как inline-кнопки с заданным текстовым заголовком */
 async function sendRunList(ctx: BotContext, header: string, runs: any[]) {
   const buttons = runs.map((r, i) => ({
     text: `${i + 1}. ${fmtDate(r.created_at)} – ${r.loss_kopeks && BigInt(r.loss_kopeks) > BigInt(0) ? 'недоплата' : 'ок'}`,
@@ -44,13 +43,9 @@ export async function handleHistory(ctx: BotContext): Promise<void> {
   const cabinets = await findCabinetsByUserId(user.id);
 
   if (cabinets.length > 0) {
-    // Группируем сверки по cabinet_id
     const byCabinet = new Map<string | null, typeof completed>();
-    byCabinet.set(null, []); // сверки без кабинета
-
-    for (const cab of cabinets) {
-      byCabinet.set(cab.id, []);
-    }
+    byCabinet.set(null, []);
+    for (const cab of cabinets) byCabinet.set(cab.id, []);
 
     for (const run of completed) {
       const { findImportById } = await import('@/src/db/repositories/imports');
@@ -60,27 +55,20 @@ export async function handleHistory(ctx: BotContext): Promise<void> {
       byCabinet.get(target)!.push(run);
     }
 
-    // Сверки без кабинета
     const noCab = byCabinet.get(null)!;
-    if (noCab.length > 0) {
-      await sendRunList(ctx, msg.historyHeader, noCab);
-    }
+    if (noCab.length > 0) await sendRunList(ctx, msg.historyHeader, noCab);
 
-    // По каждому кабинету отдельное сообщение
     for (const cab of cabinets) {
       const cabRuns = byCabinet.get(cab.id)!;
       if (cabRuns.length > 0) {
-        const header = `📜 Последние сверки кабинета ${cab.name}:`;
-        await sendRunList(ctx, header, cabRuns);
+        await sendRunList(ctx, `📜 Последние сверки кабинета ${cab.name}:`, cabRuns);
       }
     }
   } else {
-    // Нет кабинетов – один список
     await sendRunList(ctx, msg.historyHeader, completed);
   }
 }
 
-/** Отправка HTML-отчёта сверки документом в чат. Ownership уже проверен вызывающим. */
 async function sendHtmlForRun(ctx: BotContext, telegramId: bigint, runId: string): Promise<void> {
   const report = await findPrimaryReportByRunId(runId);
   if (!report || !report.storage_path) {
@@ -103,17 +91,13 @@ async function sendHtmlForRun(ctx: BotContext, telegramId: bigint, runId: string
     formData.append('chat_id', String(telegramId));
     formData.append('document', blob, `report_${runId.slice(0, 8)}.html`);
     formData.append('caption', msg.reportCaption);
-    await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
-      method: 'POST',
-      body: formData,
-    });
+    await fetch(`https://api.telegram.org/bot${token}/sendDocument`, { method: 'POST', body: formData });
   } catch (err) {
     console.error('[historyReport] failed to send report:', err);
     await ctx.reply(msg.getReportError);
   }
 }
 
-/** ⚠️ Ownership-проверка сверки. Возвращает user при успехе, иначе null. */
 async function checkRunOwnership(ctx: BotContext, runId: string) {
   const from = ctx.from;
   if (!from) return null;
@@ -127,33 +111,29 @@ async function checkRunOwnership(ctx: BotContext, runId: string) {
   return user;
 }
 
-/** Нажатие на сверку в истории: выбор формата в зависимости от тарифа. */
 export async function handleHistoryReport(ctx: BotContext, runId: string): Promise<void> {
   await ctx.answerCbQuery?.();
   const user = await checkRunOwnership(ctx, runId);
   if (!user) return;
 
   if (hasProFeatures(user.tariff)) {
-    // PRO и BUSINESS: предлагаем HTML, Sheets и CSV (только для BUSINESS)
     const row: { text: string; callback_data: string }[] = [
       { text: msg.historyHtmlButton, callback_data: `history_html:${runId}` },
     ];
     if (hasBusinessFeatures(user.tariff)) {
       row.push({ text: msg.historyCsvButton, callback_data: `history_csv:${runId}` });
     }
-    row.push({ text: msg.historySheetsButton, callback_data: `history_sheets:${runId}` });
+    row.push({ text: msg.historyXlsxButton, callback_data: `history_xlsx:${runId}` });
     await ctx.reply(msg.historyChooseFormat, {
       reply_markup: { inline_keyboard: [row] },
     });
     return;
   }
 
-  // START: сразу HTML
   if (!user.telegram_id) return;
   await sendHtmlForRun(ctx, user.telegram_id, runId);
 }
 
-/** Кнопка «📄 HTML» из истории. */
 export async function handleHistoryHtml(ctx: BotContext, runId: string): Promise<void> {
   await ctx.answerCbQuery?.();
   const user = await checkRunOwnership(ctx, runId);
