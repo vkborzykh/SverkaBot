@@ -13,16 +13,15 @@ function rub(kopeks: bigint): string {
   return `${neg ? '−' : ''}${whole},${cents}\u00A0₽`;
 }
 
-export async function handleDynamics(ctx: Context): Promise<void> {
+export async function handleStatistics(ctx: Context): Promise<void> {
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user) {
     await ctx.reply('Пользователь не найден.');
     return;
   }
 
-  // Доступно только на Профи и Бизнес
   if (!hasProFeatures(user.tariff)) {
-    await ctx.reply(msg.dynamicsUpgradeToPro);
+    await ctx.reply(msg.statisticsUpgradeToPro);
     return;
   }
 
@@ -34,7 +33,6 @@ export async function handleDynamics(ctx: Context): Promise<void> {
     return;
   }
 
-  // Считаем итоги
   let totalExpected = BigInt(0);
   let totalReceived = BigInt(0);
   let totalLoss = BigInt(0);
@@ -53,21 +51,20 @@ export async function handleDynamics(ctx: Context): Promise<void> {
     ? ((completed.filter((r) => r.loss_percent).reduce((s, r) => s + Number(r.loss_percent), 0)) / completed.length).toFixed(1)
     : '0.0';
 
-  // Фильтр по кабинетам
   const cabinets = await findCabinetsByUserId(user.id);
   const filterButtons = cabinets.map((c) => ({
-    text: msg.dynamicsCabinetLabel(c.name),
-    callback_data: `dynamics_cabinet:${c.id}`,
+    text: msg.statisticsCabinetLabel(c.name),
+    callback_data: `statistics_cabinet:${c.id}`,
   }));
 
   const lines = [
-    msg.dynamicsHeader,
+    msg.statisticsHeader,
     '',
-    msg.dynamicsTotalRuns(completed.length),
-    msg.dynamicsTotalExpected(rub(totalExpected)),
-    msg.dynamicsTotalReceived(rub(totalReceived)),
-    msg.dynamicsTotalLoss(rub(totalLoss)),
-    msg.dynamicsAvgLossPercent(avgLossPercent),
+    msg.statisticsTotalRuns(completed.length),
+    msg.statisticsTotalExpected(rub(totalExpected)),
+    msg.statisticsTotalReceived(rub(totalReceived)),
+    msg.statisticsTotalLoss(rub(totalLoss)),
+    msg.statisticsAvgLossPercent(avgLossPercent),
   ];
 
   if (lossCount > 0) {
@@ -81,7 +78,7 @@ export async function handleDynamics(ctx: Context): Promise<void> {
       reply_markup: {
         inline_keyboard: [
           ...filterButtons.map((btn) => [btn]),
-          [{ text: msg.dynamicsFilterAll, callback_data: 'dynamics_all' }],
+          [{ text: msg.statisticsFilterAll, callback_data: 'statistics_all' }],
         ],
       },
     });
@@ -90,7 +87,7 @@ export async function handleDynamics(ctx: Context): Promise<void> {
   }
 }
 
-export async function handleDynamicsFilter(ctx: Context, cabinetId?: string): Promise<void> {
+export async function handleStatisticsFilter(ctx: Context, cabinetId?: string): Promise<void> {
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user) return;
 
@@ -103,7 +100,6 @@ export async function handleDynamicsFilter(ctx: Context, cabinetId?: string): Pr
   let filterLabel = '';
 
   if (cabinetId && cabinetId !== 'all') {
-    // Фильтруем по кабинету
     const { findImportById } = await import('@/src/db/repositories/imports');
     const filteredRuns: typeof completed = [];
 
@@ -136,13 +132,13 @@ export async function handleDynamicsFilter(ctx: Context, cabinetId?: string): Pr
     : '0.0';
 
   const lines = [
-    `📊 ${filterLabel}`,
+    `📈 ${filterLabel}`,
     '',
-    msg.dynamicsTotalRuns(filtered.length),
-    msg.dynamicsTotalExpected(rub(totalExpected)),
-    msg.dynamicsTotalReceived(rub(totalReceived)),
-    msg.dynamicsTotalLoss(rub(totalLoss)),
-    msg.dynamicsAvgLossPercent(avgLossPercent),
+    msg.statisticsTotalRuns(filtered.length),
+    msg.statisticsTotalExpected(rub(totalExpected)),
+    msg.statisticsTotalReceived(rub(totalReceived)),
+    msg.statisticsTotalLoss(rub(totalLoss)),
+    msg.statisticsAvgLossPercent(avgLossPercent),
   ];
 
   await ctx.reply(lines.join('\n'));
