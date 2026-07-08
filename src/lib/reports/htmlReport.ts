@@ -41,7 +41,6 @@ export interface HtmlReportData {
   claimAmountKopeks: bigint;
   claimPeriod: string;
   claimRows: ClaimRow[];
-  exportCsvCommand?: string | null;
 }
 
 function rub(kopeks: bigint): string {
