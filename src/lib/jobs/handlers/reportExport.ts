@@ -7,14 +7,13 @@ import { findTransactionsByImportId, type CanonicalTransaction } from '@/src/db/
 import { findUserById } from '@/src/db/repositories/users';
 import { findImportById } from '@/src/db/repositories/imports';
 import { findCabinetById } from '@/src/db/repositories/wb-cabinets';
-import { findPrimaryReportByRunId, createReport, findReportByRunIdAndType } from '@/src/db/repositories/reports';
-import { storeReport, storeReportCsv } from '@/src/lib/ingestion/storage';
+import { findPrimaryReportByRunId, createReport } from '@/src/db/repositories/reports';
+import { storeReport } from '@/src/lib/ingestion/storage';
 import { buildHtmlReport, type ClaimRow, type ReportTxRow } from '@/src/lib/reports/htmlReport';
 import { clearSession } from '@/src/lib/telegram/session';
 import { msg } from '@/src/lib/telegram/messages.ru';
 import { reconciliationFinishedKeyboard } from '@/src/lib/telegram/keyboard';
-import { reportRetentionDaysFor, hasBusinessFeatures } from '@/src/lib/billing/tariffs';
-import { buildCsvForRun } from '@/src/lib/reports/csvExport';
+import { reportRetentionDaysFor } from '@/src/lib/billing/tariffs';
 
 const MAX_REPORT_ROWS = 500;
 
@@ -32,14 +31,6 @@ async function sendMessageToUser(telegramId: bigint, text: string, keyboard?: an
   } catch (err) {
     console.error('[reportExport] sendMessageToUser error:', err);
   }
-}
-
-function rub(kopeks: bigint): string {
-  const neg = kopeks < BigInt(0);
-  const a = neg ? -kopeks : kopeks;
-  const whole = (a / BigInt(100)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '\u00A0');
-  const cents = (a % BigInt(100)).toString().padStart(2, '0');
-  return `${neg ? '−' : ''}${whole},${cents}\u00A0₽`;
 }
 
 export async function handleReportExport(job: Job): Promise<void> {
@@ -143,15 +134,11 @@ export async function handleReportExport(job: Job): Promise<void> {
     description: tx.description,
   }));
 
-  const csvRequested =
-    Boolean((job.payload as Record<string, unknown>)?.csv_export) ||
-    hasBusinessFeatures(user?.tariff);
-
   const htmlReport = buildHtmlReport({
     runId,
     dateStr: fmtDmy(run.created_at),
     cabinetName,
-    exportCsvCommand: csvRequested ? `/export_csv ${runId}` : null,
+    exportCsvCommand: null,
     status: aggStatus,
     grossPayoutKopeks,
     commissionsKopeks,
@@ -187,27 +174,6 @@ export async function handleReportExport(job: Job): Promise<void> {
     is_primary: true,
     retention_days: retentionDays,
   });
-
-  // CSV-выгрузка для тарифа «Бизнес»
-  if (csvRequested) {
-    try {
-      const existingCsv = await findReportByRunIdAndType(runId, 'CSV');
-      if (!existingCsv) {
-        const csvBuffer = await buildCsvForRun(run);
-        const csvPath = await storeReportCsv(runId, csvBuffer);
-        await createReport({
-          run_id: runId,
-          storage_path: csvPath,
-          export_type: 'CSV',
-          report_version: 1,
-          is_primary: false,
-          retention_days: retentionDays,
-        });
-      }
-    } catch (err) {
-      console.error('[reportExport] CSV generation failed (non-fatal):', err);
-    }
-  }
 
   if (process.env.PUBLIC_URL && process.env.INTERNAL_TOKEN) {
     try {
