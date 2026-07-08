@@ -44,7 +44,7 @@ import {
 } from './handlers/myCabinets';
 import { handleDynamics, handleDynamicsFilter } from './handlers/dynamics';
 import { handleExportCsv, sendCsvForRun } from './handlers/exportCsv';
-import { handleExportSheets, sendSheetsForRun } from './handlers/exportSheets';
+import { handleExportXlsx, sendXlsxForRun } from './handlers/exportXlsx';
 import { TARIFF_BY_AMOUNT_KOPEKS } from '@/src/lib/billing/tariffs';
 import { msg } from './messages.ru';
 
@@ -286,8 +286,8 @@ export async function routeUpdate(
       case 'export_csv':
         await handleExportCsv(ctx as any);
         break;
-      case 'export_sheets':
-        await handleExportSheets(ctx as any);
+      case 'export_xlsx':
+        await handleExportXlsx(ctx as any);
         break;
       case 'help':
         await handleHelp(ctx as Parameters<typeof handleHelp>[0]);
@@ -356,8 +356,8 @@ export async function routeUpdate(
       await sendCsvForRun(ctx as any, data.slice('history_csv:'.length));
       return;
     }
-    if (data.startsWith('history_sheets:')) {
-      await sendSheetsForRun(ctx as any, data.slice('history_sheets:'.length));
+    if (data.startsWith('history_xlsx:')) {
+      await sendXlsxForRun(ctx as any, data.slice('history_xlsx:'.length));
       return;
     }
     if (data === 'dynamics_all') {
