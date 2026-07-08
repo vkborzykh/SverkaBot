@@ -42,7 +42,8 @@ import {
   handleCabinetNameReceived,
   handleCabinetUse,
 } from './handlers/myCabinets';
-import { handleDynamics, handleDynamicsFilter } from './handlers/dynamics';
+import { handleStatistics, handleStatisticsFilter } from './handlers/dynamics';
+import { getMainMenuKeyboard } from './keyboard';
 import { TARIFF_BY_AMOUNT_KOPEKS } from '@/src/lib/billing/tariffs';
 import { msg } from './messages.ru';
 
@@ -137,6 +138,9 @@ export async function routeUpdate(
           day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC',
         });
         await ctx.reply(`Оплата прошла успешно! Ваша подписка активна до ${formatted}. Спасибо!`);
+
+        // Обновляем главное меню, чтобы сразу показать кнопку «Статистика» для PRO/BUSINESS
+        await ctx.reply('Главное меню обновлено.', getMainMenuKeyboard(tariff));
       }
     } catch (err) {
       console.error('[successful_payment] error:', err);
@@ -183,6 +187,7 @@ export async function routeUpdate(
       [msg.menuMyCabinets]: 'my_cabinets',
       [msg.menuHelp]: 'help',
       [msg.menuHistory]: 'history',
+      [msg.menuStatistics]: 'statistics',
       [msg.menuDeleteData]: 'delete_my_data',
     };
 
@@ -201,7 +206,8 @@ export async function routeUpdate(
     if (!command) return;
 
     if (command === 'start') {
-      await handleStart(ctx as Parameters<typeof handleStart>[0]);
+      const user = await findUserByTelegramId(telegramId);
+      await handleStart(ctx as Parameters<typeof handleStart>[0], user?.tariff);
       return;
     }
 
@@ -237,7 +243,7 @@ export async function routeUpdate(
       case 'subscribe': await handleSubscribe(ctx as any); break;
       case 'referral': await handleReferral(ctx as any); break;
       case 'my_cabinets': await handleMyCabinets(ctx as any); break;
-      case 'dynamics': await handleDynamics(ctx as any); break;
+      case 'statistics': await handleStatistics(ctx as any); break;
       case 'help': await handleHelp(ctx as Parameters<typeof handleHelp>[0]); break;
       case 'history': await handleHistory(ctx as Parameters<typeof handleHistory>[0]); break;
       case 'delete_my_data': await handleDeleteMyData(ctx as Parameters<typeof handleDeleteMyData>[0]); break;
@@ -269,8 +275,8 @@ export async function routeUpdate(
       await handleCabinetUse(ctx as any, data.slice('cabinet_use:'.length));
       return;
     }
-    if (data.startsWith('dynamics_cabinet:')) {
-      await handleDynamicsFilter(ctx as any, data.slice('dynamics_cabinet:'.length));
+    if (data.startsWith('statistics_cabinet:')) {
+      await handleStatisticsFilter(ctx as any, data.slice('statistics_cabinet:'.length));
       return;
     }
     if (data.startsWith('history_report:')) {
@@ -289,8 +295,8 @@ export async function routeUpdate(
       await handleDownloadBank(ctx as any, data.slice('download_bank:'.length));
       return;
     }
-    if (data === 'dynamics_all') {
-      await handleDynamicsFilter(ctx as any, 'all');
+    if (data === 'statistics_all') {
+      await handleStatisticsFilter(ctx as any, 'all');
       return;
     }
 
