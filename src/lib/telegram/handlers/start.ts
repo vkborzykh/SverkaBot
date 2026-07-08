@@ -3,7 +3,7 @@ import { findUserByTelegramId, createUser } from '@/src/db/repositories/users';
 import { createConsent } from '@/src/db/repositories/consents';
 import { logAuditEvent } from '@/src/lib/audit/audit';
 import { hasUsedTrial, markTrialUsed } from '@/src/db/repositories/trial-usage';
-import { consentKeyboard, mainMenuKeyboard, newReconciliationKeyboard } from '../keyboard';
+import { consentKeyboard, getMainMenuKeyboard, newReconciliationKeyboard } from '../keyboard';
 import { msg } from '../messages.ru';
 
 export async function handleStart(ctx: Context): Promise<void> {
@@ -15,23 +15,24 @@ export async function handleStart(ctx: Context): Promise<void> {
   const existing = await findUserByTelegramId(telegramId);
 
   if (existing) {
+    const keyboard = getMainMenuKeyboard(existing.tariff);
     if (existing.subscription_status === 'ACTIVE') {
       await ctx.reply(
         msg.subscribeActiveGreeting(
           formatDate(existing.subscription_end_date ?? new Date()),
         ),
-        mainMenuKeyboard,
+        keyboard,
       );
     } else if (existing.subscription_status === 'TRIAL') {
       await ctx.reply(
         msg.consentAccepted(
           formatDate(existing.trial_expires_at ?? new Date()),
         ),
-        mainMenuKeyboard,
+        keyboard,
       );
     } else {
       // EXPIRED или другой
-      await ctx.reply(msg.trialExpired, mainMenuKeyboard);
+      await ctx.reply(msg.trialExpired, keyboard);
     }
     await ctx.reply('Нажмите кнопку ниже, чтобы начать сверку.', newReconciliationKeyboard);
     return;
@@ -50,22 +51,23 @@ export async function handleConsentAccept(ctx: Context): Promise<void> {
   const existing = await findUserByTelegramId(telegramId);
   if (existing) {
     await ctx.answerCbQuery();
+    const keyboard = getMainMenuKeyboard(existing.tariff);
     if (existing.subscription_status === 'ACTIVE') {
       await ctx.reply(
         msg.subscribeActiveGreeting(
           formatDate(existing.subscription_end_date ?? new Date()),
         ),
-        mainMenuKeyboard,
+        keyboard,
       );
     } else if (existing.subscription_status === 'TRIAL') {
       await ctx.reply(
         msg.consentAccepted(
           formatDate(existing.trial_expires_at ?? new Date()),
         ),
-        mainMenuKeyboard,
+        keyboard,
       );
     } else {
-      await ctx.reply(msg.trialExpired, mainMenuKeyboard);
+      await ctx.reply(msg.trialExpired, keyboard);
     }
     await ctx.reply('Нажмите кнопку ниже, чтобы начать сверку.', newReconciliationKeyboard);
     return;
@@ -88,7 +90,7 @@ export async function handleConsentAccept(ctx: Context): Promise<void> {
     await logAuditEvent(user.id, 'trial_denied_reused');
     await ctx.answerCbQuery();
     await ctx.editMessageReplyMarkup(undefined);
-    await ctx.reply(msg.trialAlreadyUsed, mainMenuKeyboard);
+    await ctx.reply(msg.trialAlreadyUsed, getMainMenuKeyboard(user.tariff));
     return;
   }
 
@@ -117,7 +119,7 @@ export async function handleConsentAccept(ctx: Context): Promise<void> {
 
   await ctx.answerCbQuery();
   await ctx.editMessageReplyMarkup(undefined);
-  await ctx.reply(msg.consentAccepted(formatDate(trialExpiresAt)), mainMenuKeyboard);
+  await ctx.reply(msg.consentAccepted(formatDate(trialExpiresAt)), getMainMenuKeyboard(user.tariff));
   await ctx.reply('Нажмите кнопку ниже, чтобы начать сверку.', newReconciliationKeyboard);
 }
 
