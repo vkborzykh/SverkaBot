@@ -265,8 +265,7 @@ export const msg = {
   csvExpired:
     'Не удалось подготовить CSV: данные этой сверки уже удалены по сроку хранения.',
   historyChooseFormat: 'В каком формате прислать отчёт?',
-  historyHtmlButton: '📄 HTML',
-  historyCsvButton: '📊 CSV',
+  historyHtmlButton: '📄 Результат сверки',
   historyReportExpired: '🤷‍♂️ Срок хранения этого HTML-отчёта уже истёк.',
 
   // ── XLSX export (тарифы «Профи» и «Бизнес») ─────────────────────────────────
@@ -275,7 +274,6 @@ export const msg = {
   xlsxCaption: 'Excel-выгрузка транзакций сверки.',
   xlsxSent: '✅ Файл Excel отправлен.',
   xlsxError: 'Не удалось создать Excel-файл. Попробуйте позже или напишите в поддержку: @vBorzykh',
-  historyXlsxButton: '📊 Excel',
 } as const;
 
 // ── Reconciliation verdicts ─────────────────────────────────────────────────
