@@ -20,6 +20,7 @@ export const msg = {
   menuMyCabinets: '🔑 Мои WB кабинеты',
   menuHelp: '❓ Помощь',
   menuHistory: '📜 История',
+  menuStatistics: '📈 Статистика',
   menuDeleteData: '🗑 Удалить мои данные',
 
   // ── Access ────────────────────────────────────────────────────────────────────
@@ -77,7 +78,8 @@ export const msg = {
   subscribeActiveGreeting: (expiryDate: string): string =>
     `Ваша подписка активна до ${expiryDate}.`,
   subscribeReminderExpiry: 'Ваша подписка закончится через 3 дня. Продлите, чтобы не потерять доступ: /subscribe',
-  subscribeReminderInactivity: 'Давно не сверяли выплаты? Загрузите свежие отчёты и проверьте, все ли средства поступили.',
+  subscribeReminderInactivity:
+    'Давно не сверяли выплаты? Загрузите свежие отчёты и проверьте, все ли средства поступили.',
   subscriptionStatusTrialActive: (date: string) => `Текущий статус: пробный период активен до ${date}.`,
   subscriptionStatusTrialExpired: 'Текущий статус: пробный период завершён.',
   subscriptionStatusTariffStart: (date: string) => `Текущий статус: подключен тариф «Старт» (до ${date}).`,
@@ -117,7 +119,7 @@ export const msg = {
     '/delete_my_data – удалить все данные\n\n' +
     '**Тарифы** (оформление – /subscribe):\n' +
     '🚀 «Старт» – 990 ₽/мес: до 4 сверок в месяц, HTML-отчёт и шаблон претензии\n' +
-    '⚡️ «Профи» – 1 990 ₽/мес: безлимитные сверки, страница «Динамика», приоритетная обработка\n' +
+    '⚡️ «Профи» – 1 990 ₽/мес: безлимитные сверки, «Статистика», приоритетная обработка\n' +
     '💼 «Бизнес» – 4 990 ₽/мес: всё из «Профи» + до 5 кабинетов WB, хранение отчётов 365 дней\n\n' +
     'Новым пользователям – пробный период 7 дней (до 3 сверок бесплатно).\n\n' +
     'За дополнительной помощью обращайтесь в службу поддержки: @vBorzykh.',
@@ -250,16 +252,16 @@ export const msg = {
   cabinetChosen: (name: string): string => `Кабинет: «${name}».`,
   cabinetSelected: (name: string): string => `Выбран кабинет «${name}».`,
 
-  // ── Dynamics ────────────────────────────────────────────────────────────────
-  dynamicsHeader: '📊 Динамика сверок',
-  dynamicsTotalRuns: (n: number): string => `Всего сверок: ${n}`,
-  dynamicsTotalExpected: (amount: string): string => `Ожидалось к выплате: ${amount}`,
-  dynamicsTotalReceived: (amount: string): string => `Поступило: ${amount}`,
-  dynamicsTotalLoss: (amount: string): string => `Неподтверждённые выплаты: ${amount}`,
-  dynamicsAvgLossPercent: (pct: string): string => `Средний процент потерь: ${pct}%`,
-  dynamicsUpgradeToPro: 'Страница «Динамика» доступна на тарифах «Профи» и «Бизнес». Перейдите на Профи, чтобы видеть сводную аналитику.',
-  dynamicsFilterAll: 'Все кабинеты',
-  dynamicsCabinetLabel: (name: string): string => `🗂 ${name}`,
+  // ── Statistics ──────────────────────────────────────────────────────────────
+  statisticsHeader: '📈 Статистика сверок',
+  statisticsTotalRuns: (n: number): string => `Всего сверок: ${n}`,
+  statisticsTotalExpected: (amount: string): string => `Ожидалось к выплате: ${amount}`,
+  statisticsTotalReceived: (amount: string): string => `Поступило: ${amount}`,
+  statisticsTotalLoss: (amount: string): string => `Неподтверждённые выплаты: ${amount}`,
+  statisticsAvgLossPercent: (pct: string): string => `Средний процент потерь: ${pct}%`,
+  statisticsUpgradeToPro: '📈 Статистика доступна на тарифах «Профи» и «Бизнес». Перейдите на Профи, чтобы видеть сводную аналитику.',
+  statisticsFilterAll: 'Все кабинеты',
+  statisticsCabinetLabel: (name: string): string => `🗂 ${name}`,
 
   // ── History buttons ─────────────────────────────────────────────────────────
   historyHtmlButton: '📄 Результат сверки',
