@@ -39,7 +39,7 @@ function buildUserMessage(r: WbPayoutResult): string {
       message += '\nРасхождений не найдено.';
       break;
     case 'overpaid':
-      message += '\nПоступило больше ожидаемого – расхождений в вашу пользу.';
+      message += '\nПоступило больше ожидаемого.';
       break;
     case 'underpaid':
       message += `\nВозможная недоплата: ${rub(r.discrepancyKopeks)}.`;
