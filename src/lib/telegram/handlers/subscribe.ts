@@ -4,9 +4,15 @@ import { msg } from '../messages.ru';
 
 const TARIFFS = {
   START: { priceKopeks: 99000, label: '🚀 Старт', desc: '30 дней, до 4 сверок в месяц' },
-  PRO: { priceKopeks: 199000, label: '⚡ Профи', desc: '30 дней, безлимит, Google Sheets, Динамика, приоритет' },
-  BUSINESS: { priceKopeks: 499000, label: '💼 Бизнес', desc: '30 дней, до 5 кабинетов, CSV, хранение 365 дней' },
+  PRO: { priceKopeks: 199000, label: '⚡ Профи', desc: '30 дней, безлимит, Динамика, приоритет' },
+  BUSINESS: { priceKopeks: 499000, label: '💼 Бизнес', desc: '30 дней, до 5 кабинетов, хранение 365 дней' },
 };
+
+function formatDate(date: Date): string {
+  return date.toLocaleDateString('ru-RU', {
+    day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC',
+  });
+}
 
 export async function handleSubscribe(ctx: Context): Promise<void> {
   const from = ctx.from;
@@ -18,7 +24,38 @@ export async function handleSubscribe(ctx: Context): Promise<void> {
     return;
   }
 
-  await ctx.reply('Выберите тариф:', {
+  // Формируем сообщение о текущем статусе
+  let statusText: string;
+  const now = new Date();
+  if (user.subscription_status === 'TRIAL' && user.trial_expires_at) {
+    const trialEnd = new Date(user.trial_expires_at);
+    if (trialEnd > now) {
+      statusText = msg.subscriptionStatusTrialActive(formatDate(trialEnd));
+    } else {
+      statusText = msg.subscriptionStatusTrialExpired;
+    }
+  } else if (user.subscription_status === 'ACTIVE' && user.subscription_end_date) {
+    const endDate = new Date(user.subscription_end_date);
+    const formatted = formatDate(endDate);
+    switch (user.tariff) {
+      case 'START':
+        statusText = msg.subscriptionStatusTariffStart(formatted);
+        break;
+      case 'PRO':
+        statusText = msg.subscriptionStatusTariffPro(formatted);
+        break;
+      case 'BUSINESS':
+        statusText = msg.subscriptionStatusTariffBusiness(formatted);
+        break;
+      default:
+        statusText = 'Текущий статус: активна подписка.';
+    }
+  } else {
+    statusText = 'Текущий статус: нет активной подписки.';
+  }
+
+  await ctx.reply(statusText);
+  await ctx.reply(msg.chooseTariffPrompt, {
     reply_markup: {
       inline_keyboard: [
         [{ text: `${TARIFFS.START.label} — 990 ₽/мес (4 сверки)`, callback_data: 'tariff_start' }],
@@ -54,25 +91,37 @@ async function sendInvoice(ctx: Context, userId: string, tariffKey: keyof typeof
 }
 
 export async function handleTariffStart(ctx: Context): Promise<void> {
-  await ctx.answerCbQuery();
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user) return;
+  if (user.tariff === 'START') {
+    await ctx.answerCbQuery(msg.tariffAlreadyActive, { show_alert: true });
+    return;
+  }
+  await ctx.answerCbQuery();
   await updateUser(user.id, { tariff: 'START' });
   await sendInvoice(ctx, user.id, 'START');
 }
 
 export async function handleTariffPro(ctx: Context): Promise<void> {
-  await ctx.answerCbQuery();
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user) return;
+  if (user.tariff === 'PRO') {
+    await ctx.answerCbQuery(msg.tariffAlreadyActive, { show_alert: true });
+    return;
+  }
+  await ctx.answerCbQuery();
   await updateUser(user.id, { tariff: 'PRO' });
   await sendInvoice(ctx, user.id, 'PRO');
 }
 
 export async function handleTariffBusiness(ctx: Context): Promise<void> {
-  await ctx.answerCbQuery();
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user) return;
+  if (user.tariff === 'BUSINESS') {
+    await ctx.answerCbQuery(msg.tariffAlreadyActive, { show_alert: true });
+    return;
+  }
+  await ctx.answerCbQuery();
   await updateUser(user.id, { tariff: 'BUSINESS' });
   await sendInvoice(ctx, user.id, 'BUSINESS');
 }
