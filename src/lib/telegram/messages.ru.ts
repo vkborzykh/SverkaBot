@@ -268,14 +268,6 @@ export const msg = {
   historyHtmlButton: '📄 Результат сверки',
   historyReportExpired: '🤷‍♂️ Срок хранения этого HTML-отчёта уже истёк.',
 
-  // ── XLSX export (тарифы «Профи» и «Бизнес») ─────────────────────────────────
-  xlsxProOnly: 'Выгрузка в Excel доступна на тарифах «Профи» и «Бизнес».',
-  xlsxMissingId: 'Укажите ID сверки: /export_xlsx <id>',
-  xlsxCaption: 'Excel-выгрузка транзакций сверки.',
-  xlsxSent: '✅ Файл Excel отправлен.',
-  xlsxError: 'Не удалось создать Excel-файл. Попробуйте позже или напишите в поддержку: @vBorzykh',
-} as const;
-
 // ── Reconciliation verdicts ─────────────────────────────────────────────────
 export const reconciliationVerdicts = {
   matched:   { title: 'Расхождений не найдено', hint: 'Сумма поступлений совпала с ожидаемой выплатой.' },
