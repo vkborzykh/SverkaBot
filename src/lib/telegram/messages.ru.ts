@@ -50,7 +50,7 @@ export const msg = {
   syncCompleted: (expected: string, received: string): string =>
     `✅ Сверка завершена. Ожидалось к выплате: ${expected}. Поступило от Wildberries: ${received}.`,
   syncCompletedReconciled: 'Расхождений не найдено.',
-  syncCompletedOverpaid: 'Поступило больше ожидаемого – расхождений в вашу пользу.',
+  syncCompletedOverpaid: 'Поступило больше ожидаемого.',
   syncCompletedUnderpaid: 'Возможная недоплата.',
   syncCompletedMissing: 'Поступлений от Wildberries не найдено.',
   syncReportGenerating: '📄 Готовлю отчёт – он придёт в течение минуты.',
