@@ -9,6 +9,10 @@ export const msg = {
   consentDeclined: 'Без согласия использование сервиса невозможно.',
   consentAccepted: (expiryDate: string) =>
     `Вам открыт бесплатный доступ на 7 дней (до ${expiryDate}).`,
+  historyChooseFile: 'Выберите интересующий файл:',
+  downloadWbFileButton: '📊 WB отчёт',
+  downloadBankFileButton: '🏦 Выписка',
+  fileNotFound: 'Файл не найден. Возможно, истёк срок хранения.',
 
   // ── Main menu ────────────────────────────────────────────────────────────────
   menuNewReconciliation: '🆕 Начать новую сверку',
