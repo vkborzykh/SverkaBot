@@ -1,82 +1,50 @@
-// Генерация CSV-выгрузки транзакций WB (тариф «Бизнес»).
-// Формат под Excel RU: BOM UTF-8, разделитель «;», CRLF, суммы «1234,56».
-//
-// buildCsvForRun — единственный источник правды: используется и в reportExport
-// (фоновая генерация вместе с HTML), и в /export_csv (регенерация на лету,
-// если файл истёк по retention или не создавался).
-
+// src/lib/reports/csvExport.ts
 import { findTransactionsByImportId, type CanonicalTransaction } from '@/src/db/repositories/canonical-transactions';
 import { findMatchesByRunId } from '@/src/db/repositories/reconciliation-matches';
 import { findMatchItemsByMatchId } from '@/src/db/repositories/reconciliation-match-items';
+import { findEvidenceByMatchId } from '@/src/db/repositories/reconciliation-evidence';
 import { findImportById } from '@/src/db/repositories/imports';
 import { findCabinetById } from '@/src/db/repositories/wb-cabinets';
 
 const SEP = ';';
-const HEADER = [
-  'Дата',
-  'Тип',
-  'Сумма',
-  'Назначение',
-  'Номер поставки (SRID)',
-  'Кабинет',
-  'Статус сверки',
-];
 
-export interface WbCsvRow {
+interface Summary {
+  expectedKopeks: bigint;
+  receivedKopeks: bigint;
+  lossKopeks: bigint;
+  matchRate: string;
+}
+
+interface TxRow {
   dateStr: string;
-  type: 'Выплата' | 'Удержание' | 'Возврат';
+  type: string;
   amountKopeks: bigint;
   description: string | null;
   srid: string | null;
-  cabinetName: string | null;
-  matchStatus: 'Найдено' | 'Не найдено' | 'Неоднозначно';
 }
 
-/** Экранирование по RFC 4180; переводы строк схлопываются в пробел. */
+interface BankRow extends TxRow {
+  isWb: boolean;
+  counterparty: string | null;
+}
+
+export interface ReconciliationData {
+  cabinetName: string | null;
+  summary: Summary;
+  wbRows: TxRow[];
+  bankRows: BankRow[];
+}
+
+// Экранирование CSV
 function cell(v: string | null | undefined): string {
   const s = (v ?? '').replace(/\r?\n/g, ' ').trim();
   return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-/** «1234,56» — запятая как десятичный разделитель, без разделителей тысяч:
- *  так Excel RU распознаёт число, а не строку. */
 function amount(kopeks: bigint): string {
   const neg = kopeks < BigInt(0);
   const a = neg ? -kopeks : kopeks;
   return `${neg ? '-' : ''}${a / BigInt(100)},${(a % BigInt(100)).toString().padStart(2, '0')}`;
-}
-
-export function buildWbTransactionsCsv(rows: WbCsvRow[]): Buffer {
-  const lines = [HEADER.join(SEP)];
-  for (const r of rows) {
-    lines.push(
-      [
-        cell(r.dateStr),
-        cell(r.type),
-        amount(r.amountKopeks),
-        cell(r.description),
-        cell(r.srid),
-        cell(r.cabinetName),
-        cell(r.matchStatus),
-      ].join(SEP),
-    );
-  }
-  // BOM обязателен: без него Excel на Windows покажет кириллицу кракозябрами
-  return Buffer.from('\uFEFF' + lines.join('\r\n') + '\r\n', 'utf-8');
-}
-
-function matchStatusRu(matchType: string | null | undefined): WbCsvRow['matchStatus'] {
-  if (matchType === 'MATCHED' || matchType === 'SPLIT_MATCHED' || matchType === 'COMBINED_MATCHED') {
-    return 'Найдено';
-  }
-  if (matchType === 'AMBIGUOUS') return 'Неоднозначно';
-  return 'Не найдено';
-}
-
-function rowType(tx: CanonicalTransaction): WbCsvRow['type'] {
-  if ((tx.direction as string) === 'OUT') return 'Удержание';
-  if (/возврат/i.test(tx.description ?? '')) return 'Возврат';
-  return 'Выплата';
 }
 
 function fmtDmy(d: Date | string | null | undefined): string {
@@ -87,60 +55,131 @@ function fmtDmy(d: Date | string | null | undefined): string {
   return `${p(dt.getDate())}.${p(dt.getMonth() + 1)}.${dt.getFullYear()}`;
 }
 
-/**
- * Собирает массив строк транзакций WB со статусами сверки и кабинетом.
- * Используется как для CSV-выгрузки, так и для экспорта в Google Sheets.
- */
-export async function collectWbCsvRows(run: {
+/** Собирает все данные сверки для CSV и XLSX */
+export async function collectReconciliationData(run: {
   id: string;
   wb_import_id: string;
-}): Promise<WbCsvRow[]> {
-  const [wbTxs, matches] = await Promise.all([
+  bank_import_id: string;
+}): Promise<ReconciliationData> {
+  const [wbTxs, bankTxs, matches] = await Promise.all([
     findTransactionsByImportId(run.wb_import_id),
+    findTransactionsByImportId(run.bank_import_id),
     findMatchesByRunId(run.id),
   ]);
 
-  // Карта: id WB-транзакции → тип матча
-  const statusByWbTx = new Map<string, string>();
-  for (const m of matches) {
-    const items = await findMatchItemsByMatchId(m.id);
-    for (const it of items) {
-      if (it.side === 'WB') statusByWbTx.set(it.transaction_id, (m.match_type as string) ?? 'UNMATCHED');
-    }
-  }
-
-  // Название кабинета (может отсутствовать — колонка будет пустой)
+  // Название кабинета
   let cabinetName: string | null = null;
   try {
     const wbImport = await findImportById(run.wb_import_id);
     const cabId = (wbImport as { cabinet_id?: string | null } | undefined)?.cabinet_id;
     if (cabId) cabinetName = (await findCabinetById(cabId))?.name ?? null;
-  } catch (err) {
-    console.error('[csvExport] cabinet lookup failed:', err);
+  } catch {}
+
+  // Сводка из evidence первого матча типа wb_net_payout
+  let summary: Summary = {
+    expectedKopeks: BigInt(0),
+    receivedKopeks: BigInt(0),
+    lossKopeks: BigInt(0),
+    matchRate: '0',
+  };
+
+  const wbNetMatch = matches.find(m => m.match_type === 'MATCHED' || m.match_type === 'COMBINED_MATCHED');
+  if (wbNetMatch) {
+    const ev = await findEvidenceByMatchId(wbNetMatch.id);
+    const pen = ev?.penalties as Record<string, unknown> | undefined;
+    if (pen && pen.strategy === 'wb_net_payout') {
+      const expected = BigInt(String(pen.expected_net_kopeks ?? '0'));
+      const received = BigInt(String(pen.received_kopeks ?? '0'));
+      summary = {
+        expectedKopeks: expected,
+        receivedKopeks: received,
+        lossKopeks: expected - received,
+        matchRate: (expected > 0 ? (Number(received) / Number(expected) * 100).toFixed(1) : '0') + '%',
+      };
+    }
   }
 
-  const sorted = [...wbTxs].sort((a, b) => {
+  // Список bank-транзакций, участвовавших в матче
+  const matchedBankIds = new Set<string>();
+  for (const m of matches) {
+    const items = await findMatchItemsByMatchId(m.id);
+    for (const it of items) {
+      if (it.side === 'BANK') matchedBankIds.add(it.transaction_id);
+    }
+  }
+
+  // Формируем WB-строки (без статуса)
+  const wbSorted = [...wbTxs].sort((a, b) => {
     const ta = a.transaction_date ? new Date(a.transaction_date).getTime() : 0;
     const tb = b.transaction_date ? new Date(b.transaction_date).getTime() : 0;
     return ta - tb;
   });
 
-  return sorted.map((tx) => ({
+  const wbRows: TxRow[] = wbSorted.map(tx => ({
     dateStr: fmtDmy(tx.transaction_date),
-    type: rowType(tx),
+    type: (tx.direction as string) === 'OUT' ? 'Удержание' : 'Выплата',
     amountKopeks: tx.amount_kopeks ?? BigInt(0),
     description: tx.description,
     srid: tx.reference,
-    cabinetName,
-    matchStatus: matchStatusRu(statusByWbTx.get(tx.id)),
   }));
+
+  // Формируем банковские строки (все поступления, с пометкой WB)
+  const bankCredits = bankTxs.filter(t => (t.direction as string) !== 'OUT');
+  const bankSorted = bankCredits.sort((a, b) => {
+    const ta = a.transaction_date ? new Date(a.transaction_date).getTime() : 0;
+    const tb = b.transaction_date ? new Date(b.transaction_date).getTime() : 0;
+    return ta - tb;
+  });
+
+  const bankRows: BankRow[] = bankSorted.map(tx => ({
+    dateStr: fmtDmy(tx.transaction_date),
+    type: 'Поступление',
+    amountKopeks: tx.amount_kopeks ?? BigInt(0),
+    description: tx.description,
+    srid: tx.reference,
+    isWb: matchedBankIds.has(tx.id),
+    counterparty: tx.counterparty,
+  }));
+
+  return { cabinetName, summary, wbRows, bankRows };
 }
 
-/** Собирает CSV по завершённой сверке из канонических данных. */
+/** Генерирует CSV-буфер */
 export async function buildCsvForRun(run: {
   id: string;
   wb_import_id: string;
+  bank_import_id: string;
 }): Promise<Buffer> {
-  const rows = await collectWbCsvRows(run);
-  return buildWbTransactionsCsv(rows);
+  const data = await collectReconciliationData(run);
+  const lines: string[] = [];
+
+  lines.push(`Сверка WB${data.cabinetName ? `, кабинет: ${data.cabinetName}` : ''}`);
+  lines.push(`Ожидалось к выплате;${amount(data.summary.expectedKopeks)}`);
+  lines.push(`Поступило от WB;${amount(data.summary.receivedKopeks)}`);
+  lines.push(`Расхождение;${amount(data.summary.lossKopeks)}`);
+  lines.push(`Совпадение;${data.summary.matchRate}`);
+  lines.push('');
+
+  // Таблица WB
+  lines.push('Отчёт WB');
+  lines.push(['Дата', 'Тип', 'Сумма', 'Назначение', 'Номер поставки'].join(SEP));
+  for (const r of data.wbRows) {
+    lines.push([
+      cell(r.dateStr), cell(r.type), amount(r.amountKopeks),
+      cell(r.description), cell(r.srid),
+    ].join(SEP));
+  }
+
+  lines.push('');
+  lines.push('Банковские поступления');
+  lines.push(['Дата', 'Сумма', 'Отправитель', 'Назначение', 'От WB'].join(SEP));
+  for (const r of data.bankRows) {
+    lines.push([
+      cell(r.dateStr), amount(r.amountKopeks),
+      cell(r.counterparty), cell(r.description),
+      r.isWb ? 'Да' : 'Нет',
+    ].join(SEP));
+  }
+
+  return Buffer.from('\uFEFF' + lines.join('\r\n') + '\r\n', 'utf-8');
 }
