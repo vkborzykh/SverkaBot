@@ -98,7 +98,6 @@ export async function handleTariffStart(ctx: Context): Promise<void> {
     return;
   }
   await ctx.answerCbQuery();
-  await updateUser(user.id, { tariff: 'START' });
   await sendInvoice(ctx, user.id, 'START');
 }
 
@@ -110,7 +109,6 @@ export async function handleTariffPro(ctx: Context): Promise<void> {
     return;
   }
   await ctx.answerCbQuery();
-  await updateUser(user.id, { tariff: 'PRO' });
   await sendInvoice(ctx, user.id, 'PRO');
 }
 
@@ -122,7 +120,6 @@ export async function handleTariffBusiness(ctx: Context): Promise<void> {
     return;
   }
   await ctx.answerCbQuery();
-  await updateUser(user.id, { tariff: 'BUSINESS' });
   await sendInvoice(ctx, user.id, 'BUSINESS');
 }
 
