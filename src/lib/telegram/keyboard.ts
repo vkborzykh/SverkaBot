@@ -1,4 +1,5 @@
 import { msg } from './messages.ru';
+import { hasProFeatures } from '@/src/lib/billing/tariffs';
 
 export const consentKeyboard = {
   reply_markup: {
@@ -20,20 +21,36 @@ export const deleteConfirmKeyboard = {
   },
 };
 
-export const mainMenuKeyboard = {
-  reply_markup: {
-    keyboard: [
-      [msg.menuNewReconciliation],
-      [msg.menuSubscribe, msg.menuMyCabinets],
-      [msg.menuHelp, msg.menuHistory],
-      [msg.menuDeleteData],
-    ],
-    resize_keyboard: true,
-  },
-};
+/**
+ * Возвращает клавиатуру главного меню в зависимости от тарифа пользователя.
+ * Для PRO и BUSINESS добавляется кнопка «📈 Статистика».
+ */
+export function getMainMenuKeyboard(userTariff?: string | null) {
+  const keyboard = [
+    [msg.menuNewReconciliation],
+    [msg.menuSubscribe, msg.menuMyCabinets],
+    [msg.menuHelp, msg.menuHistory],
+  ];
+
+  if (hasProFeatures(userTariff)) {
+    keyboard.push([msg.menuStatistics]);
+  }
+
+  keyboard.push([msg.menuDeleteData]);
+
+  return {
+    reply_markup: {
+      keyboard,
+      resize_keyboard: true,
+    },
+  };
+}
+
+// Старая статическая клавиатура (оставлена для обратной совместимости,
+// но в коде следует использовать getMainMenuKeyboard)
+export const mainMenuKeyboard = getMainMenuKeyboard();
 
 // Inline-клавиатуры для этапов сверки
-
 export const newReconciliationKeyboard = {
   reply_markup: {
     inline_keyboard: [
@@ -76,7 +93,6 @@ export const reconciliationFinishedKeyboard = {
   },
 };
 
-// Клавиатуры для замены файлов (используются в parseWb/parseBank при ошибках)
 export const replaceWbInlineKeyboard = {
   reply_markup: {
     inline_keyboard: [
