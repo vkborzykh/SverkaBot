@@ -575,6 +575,7 @@ export const jobs = pgTable(
     retries: integer('retries'),
     last_error: text('last_error'),
     payload: jsonb('payload'),
+    priority: integer('priority').notNull().default(100),
     started_at: timestamp('started_at', { withTimezone: true }),
     completed_at: timestamp('completed_at', { withTimezone: true }),
     created_at: timestamp('created_at', { withTimezone: true })
