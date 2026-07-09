@@ -43,6 +43,7 @@ import {
   handleCabinetUse,
 } from './handlers/myCabinets';
 import { handleStatistics, handleStatisticsFilter } from './handlers/dynamics';
+import { handleExportCommand, handleExportCsv, handleExportXlsx, handleExport1c } from './handlers/exportBusiness';
 import { getMainMenuKeyboard } from './keyboard';
 import { TARIFF_BY_AMOUNT_KOPEKS } from '@/src/lib/billing/tariffs';
 import { msg } from './messages.ru';
@@ -244,6 +245,7 @@ export async function routeUpdate(
       case 'referral': await handleReferral(ctx as any); break;
       case 'my_cabinets': await handleMyCabinets(ctx as any); break;
       case 'statistics': await handleStatistics(ctx as any); break;
+      case 'export': await handleExportCommand(ctx as any); break;
       case 'help': await handleHelp(ctx as Parameters<typeof handleHelp>[0]); break;
       case 'history': await handleHistory(ctx as Parameters<typeof handleHistory>[0]); break;
       case 'delete_my_data': await handleDeleteMyData(ctx as Parameters<typeof handleDeleteMyData>[0]); break;
@@ -293,6 +295,18 @@ export async function routeUpdate(
     }
     if (data.startsWith('download_bank:')) {
       await handleDownloadBank(ctx as any, data.slice('download_bank:'.length));
+      return;
+    }
+    if (data.startsWith('export_csv:')) {
+      await handleExportCsv(ctx as any, data.slice('export_csv:'.length));
+      return;
+    }
+    if (data.startsWith('export_xlsx:')) {
+      await handleExportXlsx(ctx as any, data.slice('export_xlsx:'.length));
+      return;
+    }
+    if (data.startsWith('export_1c:')) {
+      await handleExport1c(ctx as any, data.slice('export_1c:'.length));
       return;
     }
     if (data === 'statistics_all') {
