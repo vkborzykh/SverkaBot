@@ -23,12 +23,18 @@ export const deleteConfirmKeyboard = {
 
 /**
  * Возвращает клавиатуру главного меню в зависимости от тарифа пользователя.
- * Для PRO и BUSINESS добавляется кнопка «📈 Статистика».
+ * Кнопка «Мои кабинеты» видна только на PRO и BUSINESS.
+ * Кнопка «📈 Статистика» — только на PRO/BUSINESS.
  */
 export function getMainMenuKeyboard(userTariff?: string | null) {
+  const secondRow = [msg.menuSubscribe];
+  if (hasProFeatures(userTariff)) {
+    secondRow.push(msg.menuMyCabinets);
+  }
+
   const keyboard = [
     [msg.menuNewReconciliation],
-    [msg.menuSubscribe, msg.menuMyCabinets],
+    secondRow,
     [msg.menuHelp, msg.menuHistory],
   ];
 
