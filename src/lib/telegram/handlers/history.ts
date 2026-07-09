@@ -5,6 +5,7 @@ import { findPrimaryReportByRunId } from '@/src/db/repositories/reports';
 import { findImportById } from '@/src/db/repositories/imports';
 import { loadFile } from '@/src/lib/ingestion/storage';
 import { msg } from '@/src/lib/telegram/messages.ru';
+import { hasBusinessFeatures } from '@/src/lib/billing/tariffs';
 import type { BotContext } from '@/src/lib/telegram/router';
 
 function fmtDate(d: string | Date): string {
@@ -96,18 +97,39 @@ async function checkRunOwnership(ctx: BotContext, runId: string) {
   return user;
 }
 
-/** Нажатие на сверку в истории: показывает три кнопки */
+/** Нажатие на сверку в истории: показывает кнопки для получения файлов */
 export async function handleHistoryReport(ctx: BotContext, runId: string): Promise<void> {
   await ctx.answerCbQuery?.();
   const user = await checkRunOwnership(ctx, runId);
   if (!user) return;
 
+  const keyboardRows: { text: string; callback_data: string }[][] = [
+    [{ text: msg.historyHtmlButton, callback_data: `history_html:${runId}` }],
+    [{ text: msg.downloadWbFileButton, callback_data: `download_wb:${runId}` }],
+    [{ text: msg.downloadBankFileButton, callback_data: `download_bank:${runId}` }],
+  ];
+
+  // Кнопка экспорта только для BUSINESS
+  if (hasBusinessFeatures(user.tariff)) {
+    keyboardRows.push([{ text: '⤵️ Экспортировать', callback_data: `export_menu:${runId}` }]);
+  }
+
   await ctx.reply(msg.historyChooseFile, {
+    reply_markup: { inline_keyboard: keyboardRows },
+  });
+}
+
+/** Показывает меню выбора формата экспорта */
+export async function handleExportMenu(ctx: BotContext, runId: string): Promise<void> {
+  await ctx.answerCbQuery?.();
+  await ctx.reply(msg.exportChooseFormat, {
     reply_markup: {
       inline_keyboard: [
-        [{ text: msg.historyHtmlButton, callback_data: `history_html:${runId}` }],
-        [{ text: msg.downloadWbFileButton, callback_data: `download_wb:${runId}` }],
-        [{ text: msg.downloadBankFileButton, callback_data: `download_bank:${runId}` }],
+        [
+          { text: msg.exportCsvButton, callback_data: `export_csv:${runId}` },
+          { text: msg.exportXlsxButton, callback_data: `export_xlsx:${runId}` },
+          { text: msg.export1cButton, callback_data: `export_1c:${runId}` },
+        ],
       ],
     },
   });
