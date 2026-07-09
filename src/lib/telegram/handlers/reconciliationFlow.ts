@@ -7,7 +7,7 @@ import { checkAccess } from '@/src/lib/telegram/access';
 import { enqueue } from '@/src/lib/jobs/queue';
 import { startReconciliation } from '@/src/lib/reconciliation/startRun';
 import { monthlyLimitFor } from '@/src/lib/billing/tariffs';
-import { findCabinetsByUserId, findCabinetById } from '@/src/db/repositories/wb-cabinets';
+import { findCabinetsByUserId, findCabinetById, createCabinet } from '@/src/db/repositories/wb-cabinets';
 
 const TRIAL_LIMIT = 3;
 
@@ -45,8 +45,8 @@ export async function handleNewReconciliation(ctx: Context, userId: string): Pro
   }
   if (checkLimitAndReply(user, ctx)) return;
 
-  // Мультикабинет
   const cabinets = await findCabinetsByUserId(user.id);
+
   if (cabinets.length > 1) {
     await setSession(BigInt(ctx.from!.id), 'choosing_cabinet', {});
     await ctx.reply(msg.cabinetChoosePrompt, {
@@ -59,7 +59,21 @@ export async function handleNewReconciliation(ctx: Context, userId: string): Pro
     return;
   }
 
-  const payload = cabinets.length === 1 ? { cabinet_id: cabinets[0].id } : {};
+  let cabinetId: string | null = cabinets.length === 1 ? cabinets[0].id : null;
+
+  if (!cabinetId) {
+    try {
+      const newCab = await createCabinet({ user_id: userId, name: 'Основной' });
+      await updateUser(userId, { current_cabinet_id: newCab.id });
+      cabinetId = newCab.id;
+    } catch (e) {
+      console.error('[handleNewReconciliation] auto-create cabinet failed:', e);
+      await ctx.reply('Произошла ошибка при создании кабинета. Попробуйте позже.');
+      return;
+    }
+  }
+
+  const payload = { cabinet_id: cabinetId };
   await setSession(BigInt(ctx.from!.id), 'reconciliation_active', payload);
   await ctx.reply(msg.newReconciliationPrompt, uploadWbInlineKeyboard);
 }
