@@ -27,7 +27,7 @@ async function claimPendingJobs(): Promise<Job[]> {
         (${jobs.payload}->>'next_attempt_at')::timestamptz <= NOW()
       )`,
     )
-    .orderBy(jobs.created_at)
+    .orderBy(jobs.priority, jobs.created_at)
     .limit(BATCH_SIZE);
 
   if (pending.length === 0) return [];
@@ -64,7 +64,7 @@ async function processBatch(claimed: Job[]): Promise<void> {
             completed_at: new Date(),
           });
           await notifyFailure(job);
-          await alertWorkerFailure(job, message);   // ← Админ-алерт при финальной ошибке
+          await alertWorkerFailure(job, message);
         } else {
           const nextAttemptAt = new Date(Date.now() + backoffMs(currentRetries));
           const existingPayload = (job.payload as JobPayload | null) ?? {};
