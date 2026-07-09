@@ -53,8 +53,6 @@ function buildUserMessage(r: WbPayoutResult): string {
 
 type UserRow = NonNullable<Awaited<ReturnType<typeof findUserById>>>;
 
-/** Отчёт доступен на активном триале и на любом оплаченном тарифе
- *  (START, PRO, BUSINESS — без различий). */
 function hasReportAccess(user: UserRow, now: Date): boolean {
   const isTrialActive =
     user.subscription_status === 'TRIAL' &&
@@ -102,20 +100,18 @@ export async function handleReconcile(job: Job): Promise<void> {
     if (user?.telegram_id) {
       const now = new Date();
       if (hasReportAccess(user, now)) {
-        // Тарифные флаги для генератора отчёта:
-        // google_sheets — PRO и BUSINESS (Бизнес включает всё из Профи),
-        // csv_export — только BUSINESS.
+        // Приоритет для BUSINESS
+        const priority = hasBusinessFeatures(user.tariff) ? 10 : 100;
         await enqueue('report_export', runId, {
           run_id: runId,
           google_sheets: hasProFeatures(user.tariff),
           csv_export: hasBusinessFeatures(user.tariff),
-        });
+        }, undefined, priority);
         await notifyUser(
           user.telegram_id,
           buildUserMessage(result) + '\n\n📄 Готовлю отчёт – он придёт в течение минуты.',
         );
       }
-      // Если нет доступа – просто не отправляем ничего
       await clearSession(user.telegram_id);
     }
   } catch (err) {
