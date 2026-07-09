@@ -10,7 +10,7 @@ import {
   softDeleteCabinet,
   type WbCabinet,
 } from '@/src/db/repositories/wb-cabinets';
-import { cabinetLimitFor, hasBusinessFeatures } from '@/src/lib/billing/tariffs';
+import { cabinetLimitFor, hasBusinessFeatures, hasProFeatures } from '@/src/lib/billing/tariffs';
 
 const MAX_NAME_LEN = 64;
 
@@ -41,6 +41,16 @@ function cabinetsKeyboard(
 export async function handleMyCabinets(ctx: Context): Promise<void> {
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user) return;
+
+  if (!hasProFeatures(user.tariff)) {
+    await ctx.reply('Мультикабинет доступен на тарифах «Профи» и «Бизнес».', {
+      reply_markup: {
+        inline_keyboard: [[{ text: '⚡ Перейти на Профи', callback_data: 'tariff_pro' }]],
+      },
+    });
+    return;
+  }
+
   const cabinets = await findCabinetsByUserId(user.id);
   const limit = cabinetLimitFor(user.tariff);
   const canAdd = cabinets.length < limit;
@@ -52,7 +62,6 @@ export async function handleMyCabinets(ctx: Context): Promise<void> {
   await ctx.reply(header, cabinetsKeyboard(cabinets, canAdd, showUpgrade, user.current_cabinet_id));
 }
 
-/** Обработчик выбора кабинета (переключение текущего) */
 export async function handleCabinetUse(ctx: Context, cabinetId: string): Promise<void> {
   await ctx.answerCbQuery?.();
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
@@ -64,7 +73,6 @@ export async function handleCabinetUse(ctx: Context, cabinetId: string): Promise
   }
   await updateUser(user.id, { current_cabinet_id: cabinetId });
   await ctx.reply(msg.cabinetSelected(cabinet.name));
-  // После выбора показываем обновлённый список
   await handleMyCabinets(ctx);
 }
 
@@ -105,7 +113,6 @@ export async function handleCabinetNameReceived(ctx: Context, rawName: string): 
   }
   try {
     const newCab = await createCabinet({ user_id: user.id, name });
-    // Если это первый кабинет и current_cabinet_id не задан, делаем его текущим
     if (!user.current_cabinet_id && count === 0) {
       await updateUser(user.id, { current_cabinet_id: newCab.id });
     }
@@ -129,7 +136,6 @@ export async function handleCabinetDelete(ctx: Context, cabinetId: string): Prom
     return;
   }
   await softDeleteCabinet(cabinetId);
-  // Если удалённый кабинет был текущим, сбрасываем current_cabinet_id
   if (user.current_cabinet_id === cabinetId) {
     await updateUser(user.id, { current_cabinet_id: null });
   }
