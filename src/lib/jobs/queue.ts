@@ -1,3 +1,4 @@
+// src/lib/jobs/queue.ts
 import { createJob } from '@/src/db/repositories/jobs';
 
 export type JobType =
@@ -14,6 +15,7 @@ export async function enqueue(
   entityId: string,
   payload: Record<string, unknown>,
   correlationId?: string,
+  priority?: number,
 ): Promise<string> {
   const job = await createJob({
     job_type: jobType,
@@ -22,6 +24,7 @@ export async function enqueue(
     status: 'PENDING',
     retries: 0,
     payload,
+    priority: priority ?? 100,
   });
   return job.id;
 }
