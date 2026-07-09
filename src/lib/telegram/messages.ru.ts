@@ -266,6 +266,18 @@ export const msg = {
   // ── History buttons ─────────────────────────────────────────────────────────
   historyHtmlButton: '📄 Результат сверки',
   historyReportExpired: '🤷‍♂️ Срок хранения этого HTML-отчёта уже истёк.',
+
+  // ── Export (BUSINESS) ───────────────────────────────────────────────────────
+  exportBusinessOnly: 'Экспорт доступен только на тарифе «Бизнес».',
+  exportMissingId: 'Укажите ID сверки: /export <id>',
+  exportChooseFormat: 'Выберите формат экспорта',
+  csvCaption: 'CSV-выгрузка результатов сверки.',
+  xlsxCaption: 'Excel-отчёт по сверке.',
+  export1cCaption: 'Реестр расхождений для 1С.',
+  exportError: 'Не удалось сформировать файл. Попробуйте позже.',
+  exportCsvButton: '📊 CSV',
+  exportXlsxButton: '📗 Excel',
+  export1cButton: '📁 Для 1С',
 } as const;
 
 // ── Reconciliation verdicts ─────────────────────────────────────────────────
