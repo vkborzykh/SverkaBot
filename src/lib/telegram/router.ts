@@ -9,7 +9,7 @@ import {
   handleBankFileReceived,
   type DocumentInfo,
 } from './handlers/upload';
-import { handleHistory, handleHistoryReport, handleHistoryHtml, handleDownloadWb, handleDownloadBank } from './handlers/history';
+import { handleHistory, handleHistoryReport, handleHistoryHtml, handleDownloadWb, handleDownloadBank, handleExportMenu } from './handlers/history';
 import { handleStatus } from './handlers/status';
 import { handleGetReport } from './handlers/getReport';
 import { handleHelp } from './handlers/stubs';
@@ -295,6 +295,10 @@ export async function routeUpdate(
     }
     if (data.startsWith('download_bank:')) {
       await handleDownloadBank(ctx as any, data.slice('download_bank:'.length));
+      return;
+    }
+    if (data.startsWith('export_menu:')) {
+      await handleExportMenu(ctx as any, data.slice('export_menu:'.length));
       return;
     }
     if (data.startsWith('export_csv:')) {
