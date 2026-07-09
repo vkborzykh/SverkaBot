@@ -13,6 +13,39 @@ function rub(kopeks: bigint): string {
   return `${neg ? '−' : ''}${whole},${cents}\u00A0₽`;
 }
 
+function buildStatisticsLines(runs: any[], label?: string): string[] {
+  let totalExpected = BigInt(0);
+  let totalReceived = BigInt(0);
+  let totalLoss = BigInt(0);
+  let lossCount = 0;
+
+  for (const run of runs) {
+    totalExpected += run.turnover_kopeks ?? BigInt(0);
+    totalReceived += (run.turnover_kopeks ?? BigInt(0)) - (run.loss_kopeks ?? BigInt(0));
+    totalLoss += run.loss_kopeks ?? BigInt(0);
+    if (run.loss_kopeks && BigInt(run.loss_kopeks) > BigInt(0)) {
+      lossCount++;
+    }
+  }
+
+  const avgLossPercent = runs.length > 0
+    ? ((runs.filter((r) => r.loss_percent).reduce((s, r) => s + Number(r.loss_percent), 0)) / runs.length).toFixed(1)
+    : '0.0';
+
+  const header = label ? `📈 ${label}` : msg.statisticsHeader;
+
+  return [
+    header,
+    '',
+    msg.statisticsTotalRuns(runs.length),
+    msg.statisticsTotalExpected(rub(totalExpected)),
+    msg.statisticsTotalReceived(rub(totalReceived)),
+    msg.statisticsTotalLoss(rub(totalLoss)),
+    msg.statisticsAvgLossPercent(avgLossPercent),
+    `Сверок с расхождениями: ${lossCount}`,
+  ];
+}
+
 export async function handleStatistics(ctx: Context): Promise<void> {
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user) {
@@ -33,58 +66,28 @@ export async function handleStatistics(ctx: Context): Promise<void> {
     return;
   }
 
-  let totalExpected = BigInt(0);
-  let totalReceived = BigInt(0);
-  let totalLoss = BigInt(0);
-  let lossCount = 0;
+  const cabinets = await findCabinetsByUserId(user.id);
 
-  for (const run of completed) {
-    totalExpected += run.turnover_kopeks ?? BigInt(0);
-    totalReceived += (run.turnover_kopeks ?? BigInt(0)) - (run.loss_kopeks ?? BigInt(0));
-    totalLoss += run.loss_kopeks ?? BigInt(0);
-    if (run.loss_kopeks && BigInt(run.loss_kopeks) > BigInt(0)) {
-      lossCount++;
-    }
+  if (cabinets.length === 0) {
+    // Нет кабинетов – сразу показываем общую статистику
+    await ctx.reply(buildStatisticsLines(completed).join('\n'));
+    return;
   }
 
-  const avgLossPercent = completed.length > 0
-    ? ((completed.filter((r) => r.loss_percent).reduce((s, r) => s + Number(r.loss_percent), 0)) / completed.length).toFixed(1)
-    : '0.0';
-
-  const cabinets = await findCabinetsByUserId(user.id);
+  // Если есть кабинеты – предлагаем выбрать, не показывая пока общую статистику
   const filterButtons = cabinets.map((c) => ({
     text: msg.statisticsCabinetLabel(c.name),
     callback_data: `statistics_cabinet:${c.id}`,
   }));
 
-  const lines = [
-    msg.statisticsHeader,
-    '',
-    msg.statisticsTotalRuns(completed.length),
-    msg.statisticsTotalExpected(rub(totalExpected)),
-    msg.statisticsTotalReceived(rub(totalReceived)),
-    msg.statisticsTotalLoss(rub(totalLoss)),
-    msg.statisticsAvgLossPercent(avgLossPercent),
-  ];
-
-  if (lossCount > 0) {
-    lines.push(`Сверок с расхождениями: ${lossCount}`);
-  }
-
-  if (cabinets.length > 1) {
-    lines.push('');
-    lines.push('Выберите кабинет для детализации:');
-    await ctx.reply(lines.join('\n'), {
-      reply_markup: {
-        inline_keyboard: [
-          ...filterButtons.map((btn) => [btn]),
-          [{ text: msg.statisticsFilterAll, callback_data: 'statistics_all' }],
-        ],
-      },
-    });
-  } else {
-    await ctx.reply(lines.join('\n'));
-  }
+  await ctx.reply('Выберите кабинет для детализации:', {
+    reply_markup: {
+      inline_keyboard: [
+        ...filterButtons.map((btn) => [btn]),
+        [{ text: msg.statisticsFilterAll, callback_data: 'statistics_all' }],
+      ],
+    },
+  });
 }
 
 export async function handleStatisticsFilter(ctx: Context, cabinetId?: string): Promise<void> {
@@ -118,28 +121,6 @@ export async function handleStatisticsFilter(ctx: Context, cabinetId?: string): 
     filterLabel = 'Все кабинеты';
   }
 
-  let totalExpected = BigInt(0);
-  let totalReceived = BigInt(0);
-  let totalLoss = BigInt(0);
-  for (const run of filtered) {
-    totalExpected += run.turnover_kopeks ?? BigInt(0);
-    totalReceived += (run.turnover_kopeks ?? BigInt(0)) - (run.loss_kopeks ?? BigInt(0));
-    totalLoss += run.loss_kopeks ?? BigInt(0);
-  }
-
-  const avgLossPercent = filtered.length > 0
-    ? ((filtered.filter((r) => r.loss_percent).reduce((s, r) => s + Number(r.loss_percent), 0)) / filtered.length).toFixed(1)
-    : '0.0';
-
-  const lines = [
-    `📈 ${filterLabel}`,
-    '',
-    msg.statisticsTotalRuns(filtered.length),
-    msg.statisticsTotalExpected(rub(totalExpected)),
-    msg.statisticsTotalReceived(rub(totalReceived)),
-    msg.statisticsTotalLoss(rub(totalLoss)),
-    msg.statisticsAvgLossPercent(avgLossPercent),
-  ];
-
+  const lines = buildStatisticsLines(filtered, filterLabel);
   await ctx.reply(lines.join('\n'));
 }
