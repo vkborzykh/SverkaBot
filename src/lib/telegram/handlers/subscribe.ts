@@ -1,11 +1,12 @@
+// src/lib/telegram/handlers/subscribe.ts
 import type { Context } from 'telegraf';
 import { findUserByTelegramId, updateUser, findUsersByInvitedBy } from '@/src/db/repositories/users';
 import { msg } from '../messages.ru';
 
 const TARIFFS = {
-  START: { priceKopeks: 99000, label: '🚀 Старт', desc: '30 дней, до 4 сверок в месяц' },
-  PRO: { priceKopeks: 199000, label: '⚡ Профи', desc: '30 дней, безлимит, Динамика, приоритет' },
-  BUSINESS: { priceKopeks: 499000, label: '💼 Бизнес', desc: '30 дней, до 5 кабинетов, хранение 365 дней' },
+  START: { priceKopeks: 99000, label: '🚀 Старт', desc: '30 дней, до 8 сверок в месяц' },
+  PRO:   { priceKopeks: 199000, label: '⚡ Профи', desc: '30 дней, безлимит, Статистика, до 2 кабинетов' },
+  BUSINESS: { priceKopeks: 499000, label: '💼 Бизнес', desc: '30 дней, до 5 кабинетов, экспорт (CSV/XLSX/1С), хранение 365 дней' },
 };
 
 function formatDate(date: Date): string {
@@ -58,9 +59,9 @@ export async function handleSubscribe(ctx: Context): Promise<void> {
   await ctx.reply(msg.chooseTariffPrompt, {
     reply_markup: {
       inline_keyboard: [
-        [{ text: `${TARIFFS.START.label} — 990 ₽/мес (4 сверки)`, callback_data: 'tariff_start' }],
+        [{ text: `${TARIFFS.START.label} — 990 ₽/мес (8 сверок)`, callback_data: 'tariff_start' }],
         [{ text: `${TARIFFS.PRO.label} — 1 990 ₽/мес (безлимит)`, callback_data: 'tariff_pro' }],
-        [{ text: `${TARIFFS.BUSINESS.label} — 4 990 ₽/мес (до 5 кабинетов)`, callback_data: 'tariff_business' }],
+        [{ text: `${TARIFFS.BUSINESS.label} — 4 990 ₽/мес (до 5 кабинетов, экспорт)`, callback_data: 'tariff_business' }],
       ],
     },
   });
