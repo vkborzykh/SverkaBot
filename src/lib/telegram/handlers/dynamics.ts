@@ -13,6 +13,28 @@ function rub(kopeks: bigint): string {
   return `${neg ? '−' : ''}${whole},${cents}\u00A0₽`;
 }
 
+/**
+ * Оставляет только уникальные сверки по паре (wb_import_id, bank_import_id).
+ * Из дубликатов сохраняется самая поздняя (по created_at).
+ */
+function uniqueRunsByImports(runs: any[]): any[] {
+  const seen = new Set<string>();
+  const sorted = [...runs].sort((a, b) => {
+    const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return tb - ta; // сначала новые
+  });
+  const result: any[] = [];
+  for (const run of sorted) {
+    const key = `${run.wb_import_id}:${run.bank_import_id}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(run);
+    }
+  }
+  return result; // порядок не важен, но для вычислений можно сохранить как есть
+}
+
 function buildStatisticsLines(runs: any[], label?: string): string[] {
   let totalExpected = BigInt(0);
   let totalReceived = BigInt(0);
@@ -66,15 +88,16 @@ export async function handleStatistics(ctx: Context): Promise<void> {
     return;
   }
 
+  // Убираем дубликаты по паре импортов
+  const uniqueCompleted = uniqueRunsByImports(completed);
+
   const cabinets = await findCabinetsByUserId(user.id);
 
   if (cabinets.length === 0) {
-    // Нет кабинетов – сразу показываем общую статистику
-    await ctx.reply(buildStatisticsLines(completed).join('\n'));
+    await ctx.reply(buildStatisticsLines(uniqueCompleted).join('\n'));
     return;
   }
 
-  // Если есть кабинеты – предлагаем выбрать, не показывая пока общую статистику
   const filterButtons = cabinets.map((c) => ({
     text: msg.statisticsCabinetLabel(c.name),
     callback_data: `statistics_cabinet:${c.id}`,
@@ -121,6 +144,9 @@ export async function handleStatisticsFilter(ctx: Context, cabinetId?: string): 
     filterLabel = 'Все кабинеты';
   }
 
-  const lines = buildStatisticsLines(filtered, filterLabel);
+  // Применяем дедупликацию после фильтрации по кабинету
+  const uniqueFiltered = uniqueRunsByImports(filtered);
+
+  const lines = buildStatisticsLines(uniqueFiltered, filterLabel);
   await ctx.reply(lines.join('\n'));
 }
