@@ -50,7 +50,7 @@ Telegram-бот ([@SverkaProBot](https://t.me/SverkaProBot)) для автома
 
 ## 📄 Лицензия
 
-MIT. Подробнее в файле [LICENSE](LICENSE).
+MIT. Подробнее в файле [LICENSE](https://github.com/vkborzykh/SverkaBot/blob/main/LICENSE).
 
 ## 📬 Контакты
 
