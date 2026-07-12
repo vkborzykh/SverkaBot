@@ -14,7 +14,7 @@ import { handleStatus } from './handlers/status';
 import { handleGetReport } from './handlers/getReport';
 import { handleHelp } from './handlers/stubs';
 import { handleDeleteMyData, handleDeleteConfirm, handleDeleteCancel } from './handlers/deleteData';
-import { handleSubscribe, handleReferral, handleTariffStart, handleTariffPro, handleTariffBusiness, handleExportAddon } from './handlers/subscribe';
+import { handleSubscribe, handleReferral, handleTariffChoice, handleTariffPeriod, handleExportAddon } from './handlers/subscribe';
 import { handleClaimText } from './handlers/claim';
 import { handleRetryImport } from './handlers/retryImport';
 import { handleCancel } from './handlers/cancelOp';
@@ -46,7 +46,8 @@ import {
 import { handleStatistics, handleStatisticsFilter } from './handlers/dynamics';
 import { handleExportCommand, handleExportCsv, handleExportXlsx, handleExport1c } from './handlers/exportBusiness';
 import { getMainMenuKeyboard } from './keyboard';
-import { TARIFF_BY_AMOUNT_KOPEKS, EXPORT_ADDON_PRICE_KOPEKS } from '@/src/lib/billing/tariffs';
+import { TARIFF_BY_AMOUNT_KOPEKS, EXPORT_ADDON_PRICE_KOPEKS, TARIFF_PRICES_KOPEKS } from '@/src/lib/billing/tariffs';
+import type { Tariff } from '@/src/lib/billing/tariffs';
 import { msg } from './messages.ru';
 
 export interface BotContext {
@@ -112,24 +113,41 @@ export async function routeUpdate(
       return;
     }
 
-    // Обработка обычной подписки
-    const tariff = TARIFF_BY_AMOUNT_KOPEKS[sp.total_amount];
-    const isValidAmount = tariff || sp.total_amount === 120000;
-    if (!isValidAmount || sp.currency !== 'RUB') {
-      console.error('[successful_payment] Invalid amount or currency', sp.total_amount, sp.currency);
-      return;
-    }
-
+    // Обработка подписки (месяц или год) – извлекаем данные из payload
     try {
+      const payload = sp.invoice_payload ?? '';
+      let tariffKey: Tariff | null = null;
+      let days = 30; // по умолчанию месяц
+
+      if (payload.startsWith('annual_')) {
+        // формат: annual_sub_<userId>_<tariffKey>_<timestamp>
+        const parts = payload.replace('annual_', '').split('_');
+        if (parts.length >= 3) {
+          tariffKey = parts[2] as Tariff; // parts: ['sub', userId, tariffKey, ...]
+          days = 365;
+        }
+      } else if (payload.startsWith('sub_')) {
+        // формат: sub_<userId>_<tariffKey>_<timestamp>
+        const parts = payload.split('_');
+        if (parts.length >= 3) {
+          tariffKey = parts[2] as Tariff;
+        }
+      }
+
+      if (!tariffKey || !['START', 'PRO', 'BUSINESS'].includes(tariffKey) || sp.currency !== 'RUB') {
+        console.error('[successful_payment] Invalid payload or currency', payload, sp.currency);
+        return;
+      }
+
       const user = await findUserByTelegramId(telegramId);
       if (user) {
         const existing = await findBillingTransactionByProviderTxId(sp.telegram_payment_charge_id);
         if (existing) return;
 
         const { activateSubscription } = await import('@/src/lib/billing/subscription');
-        const endDate = await activateSubscription(user.id, 30);
+        const endDate = await activateSubscription(user.id, days);
 
-        if (tariff) await updateUser(user.id, { tariff, monthly_reconciliations: 0 });
+        await updateUser(user.id, { tariff: tariffKey, monthly_reconciliations: 0 });
 
         let referralBonusGranted = false;
         if (user.invited_by) {
@@ -169,17 +187,18 @@ export async function routeUpdate(
         });
 
         let tariffDescription = '';
-        if (tariff === 'START') {
+        if (tariffKey === 'START') {
           tariffDescription = '🚀 Старт — до 8 сверок в месяц, HTML-отчёт, шаблон претензии.';
-        } else if (tariff === 'PRO') {
+        } else if (tariffKey === 'PRO') {
           tariffDescription = '⚡️ Профи — безлимитные сверки, статистика, до 2 кабинетов WB.';
-        } else if (tariff === 'BUSINESS') {
+        } else if (tariffKey === 'BUSINESS') {
           tariffDescription = '💼 Бизнес — безлимитные сверки, до 5 кабинетов, экспорт (CSV/XLSX/1С), приоритетная обработка.';
         }
 
+        const periodText = days === 365 ? ' (год)' : '';
         await ctx.reply(
-          `🎉 Оплата прошла успешно! Ваша подписка активна до ${formatted}.\n\n${tariffDescription}\n\nПодробнее о возможностях: /help`,
-          getMainMenuKeyboard(tariff),
+          `🎉 Оплата прошла успешно! Ваша подписка${periodText} активна до ${formatted}.\n\n${tariffDescription}\n\nПодробнее о возможностях: /help`,
+          getMainMenuKeyboard(tariffKey),
         );
 
         await ctx.reply('Нажмите кнопку ниже, чтобы начать сверку.', {
@@ -310,6 +329,18 @@ export async function routeUpdate(
     const data = 'data' in cbq ? cbq.data : undefined;
     if (!data) return;
 
+    if (data.startsWith('tariff_period:')) {
+      const rest = data.slice('tariff_period:'.length);
+      const [tariffKey, period] = rest.split(':');
+      if (tariffKey && period === 'month' || period === 'year') {
+        await handleTariffPeriod(ctx as any, tariffKey, period);
+      }
+      return;
+    }
+    if (data.startsWith('tariff_choice:')) {
+      await handleTariffChoice(ctx as any, data.slice('tariff_choice:'.length));
+      return;
+    }
     if (data.startsWith('claim_text:')) {
       await handleClaimText(ctx as any, data.slice('claim_text:'.length));
       return;
@@ -370,9 +401,6 @@ export async function routeUpdate(
     switch (data) {
       case 'cabinet_add': await handleCabinetAdd(ctx as any); break;
       case 'my_cabinets': await handleMyCabinets(ctx as any); break;
-      case 'tariff_start': await import('./handlers/subscribe').then(m => m.handleTariffStart(ctx as any)); break;
-      case 'tariff_pro': await import('./handlers/subscribe').then(m => m.handleTariffPro(ctx as any)); break;
-      case 'tariff_business': await import('./handlers/subscribe').then(m => m.handleTariffBusiness(ctx as any)); break;
       case 'tariff_export_addon': await handleExportAddon(ctx as any); break;
       case 'consent:accept': await handleConsentAccept(ctx as Parameters<typeof handleConsentAccept>[0]); break;
       case 'consent:decline': await handleConsentDecline(ctx as Parameters<typeof handleConsentDecline>[0]); break;
