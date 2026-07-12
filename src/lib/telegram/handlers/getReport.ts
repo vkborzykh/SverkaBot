@@ -5,7 +5,7 @@ import { loadFile } from '@/src/lib/ingestion/storage';
 import { enqueue } from '@/src/lib/jobs/queue';
 import { clearSession } from '@/src/lib/telegram/session';
 import { msg } from '@/src/lib/telegram/messages.ru';
-import { reconciliationFinishedKeyboard } from '@/src/lib/telegram/keyboard';
+import { getReconciliationFinishedKeyboard } from '@/src/lib/telegram/keyboard';
 import type { BotContext } from '@/src/lib/telegram/router';
 
 async function sendDocumentToUser(
@@ -113,7 +113,7 @@ export async function handleGetReport(ctx: BotContext): Promise<void> {
       // После успешной отправки очищаем сессию и выводим завершающее сообщение
       if (user.telegram_id) {
         await clearSession(user.telegram_id);
-        await sendMessageToUser(user.telegram_id, msg.reconciliationCompleted, reconciliationFinishedKeyboard);
+        await sendMessageToUser(user.telegram_id, msg.reconciliationCompleted, getReconciliationFinishedKeyboard(runId));
       }
     }
   } catch (err) {
