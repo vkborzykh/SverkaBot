@@ -5,6 +5,7 @@
   "installCommand": "npm install",
   "framework": "nextjs",
   "crons": [
-    { "path": "/api/jobs/daily", "schedule": "0 6 * * *" }
+    { "path": "/api/jobs/daily", "schedule": "0 6 * * *" },
+    { "path": "/api/jobs/weekly", "schedule": "0 9 * * 5" }
   ]
 }
