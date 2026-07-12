@@ -258,7 +258,7 @@ export const msg = {
   statisticsTotalExpected: (amount: string): string => `Ожидалось к выплате: ${amount}`,
   statisticsTotalReceived: (amount: string): string => `Поступило: ${amount}`,
   statisticsTotalLoss: (amount: string): string => `Неподтверждённые выплаты: ${amount}`,
-  statisticsAvgLossPercent: (pct: string): string => `Средний процент потерь: ${pct}%`,
+  statisticsAvgLossPercent: (pct: string): string => `Средний процент неподтверждённых выплат: ${pct}%`,
   statisticsUpgradeToPro: '📈 Статистика доступна на тарифах «Профи» и «Бизнес». Перейдите на Профи, чтобы видеть сводную аналитику.',
   statisticsFilterAll: 'Все кабинеты',
   statisticsCabinetLabel: (name: string): string => `🗂 ${name}`,
@@ -286,5 +286,5 @@ export const reconciliationVerdicts = {
   underpaid: { title: 'Обнаружена недоплата',   hint: 'Поступило меньше ожидаемого. Проверьте расхождение.' },
   notFound:  { title: 'Выплата не найдена',     hint: 'Поступлений от Wildberries за период не обнаружено.' },
   overpaid:  { title: 'Поступило больше ожидаемого',
-               hint: 'На счёт поступило больше, чем начислено к перечислению — вероятна корректировка прошлого периода.' },
+               hint: 'На счёт поступило больше, чем начислено к перечислению – вероятна корректировка прошлого периода.' },
 } as const;
