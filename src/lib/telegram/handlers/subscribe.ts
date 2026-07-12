@@ -1,6 +1,6 @@
 // src/lib/telegram/handlers/subscribe.ts
 import type { Context } from 'telegraf';
-import { findUserByTelegramId, updateUser, findUsersByInvitedBy } from '@/src/db/repositories/users';
+import { findUserByTelegramId, findUserById, updateUser, findUsersByInvitedBy } from '@/src/db/repositories/users';
 import { msg } from '../messages.ru';
 
 const TARIFFS = {
@@ -59,9 +59,9 @@ export async function handleSubscribe(ctx: Context): Promise<void> {
   await ctx.reply(msg.chooseTariffPrompt, {
     reply_markup: {
       inline_keyboard: [
-        [{ text: `${TARIFFS.START.label} — 990 ₽/мес (8 сверок)`, callback_data: 'tariff_start' }],
-        [{ text: `${TARIFFS.PRO.label} — 1 990 ₽/мес (безлимит)`, callback_data: 'tariff_pro' }],
-        [{ text: `${TARIFFS.BUSINESS.label} — 4 990 ₽/мес (до 5 кабинетов, экспорт)`, callback_data: 'tariff_business' }],
+        [{ text: `${TARIFFS.START.label} – 990 ₽/мес (8 сверок)`, callback_data: 'tariff_start' }],
+        [{ text: `${TARIFFS.PRO.label} – 1 990 ₽/мес (безлимит)`, callback_data: 'tariff_pro' }],
+        [{ text: `${TARIFFS.BUSINESS.label} – 4 990 ₽/мес (до 5 кабинетов, экспорт)`, callback_data: 'tariff_business' }],
       ],
     },
   });
@@ -69,13 +69,35 @@ export async function handleSubscribe(ctx: Context): Promise<void> {
 
 async function sendInvoice(ctx: Context, userId: string, tariffKey: keyof typeof TARIFFS) {
   const t = TARIFFS[tariffKey];
+  let priceKopeks = t.priceKopeks;
+  let discountApplied = false;
+
+  // Проверяем реферальную скидку 20%
+  try {
+    const currentUser = await findUserById(userId);
+    if (currentUser && currentUser.invited_by) {
+      const inviter = await findUserByTelegramId(currentUser.invited_by);
+      if (inviter && inviter.subscription_status === 'ACTIVE') {
+        priceKopeks = Math.round(t.priceKopeks * 0.8);
+        discountApplied = true;
+      }
+    }
+  } catch (e) {
+    // при ошибке проверки скидка не применяется
+    console.error('Referral discount check failed:', e);
+  }
+
+  const description = discountApplied
+    ? `${t.desc} (скидка 20% за друга)`
+    : t.desc;
+
   await ctx.replyWithInvoice({
-    title: `Подписка SverkaBot — ${t.label}`,
-    description: t.desc,
+    title: `Подписка SverkaBot – ${t.label}`,
+    description,
     payload: `sub_${userId}_${tariffKey}_${Date.now()}`,
     provider_token: process.env.TELEGRAM_PROVIDER_TOKEN!,
     currency: 'RUB',
-    prices: [{ label: t.label, amount: t.priceKopeks }],
+    prices: [{ label: t.label, amount: priceKopeks }],
     need_email: true,
     send_email_to_provider: true,
     provider_data: {
@@ -83,7 +105,7 @@ async function sendInvoice(ctx: Context, userId: string, tariffKey: keyof typeof
         items: [{
           description: `Подписка SverkaBot ${t.label}`,
           quantity: '1.00',
-          amount: { value: (t.priceKopeks / 100).toFixed(2), currency: 'RUB' },
+          amount: { value: (priceKopeks / 100).toFixed(2), currency: 'RUB' },
           vat_code: 1,
         }],
       },
