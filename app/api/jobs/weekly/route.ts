@@ -1,7 +1,5 @@
 import { enqueue } from '@/src/lib/jobs/queue';
 
-export const runtime = 'edge';
-
 export async function GET() {
   try {
     await enqueue('weekly_digest', crypto.randomUUID(), {});
