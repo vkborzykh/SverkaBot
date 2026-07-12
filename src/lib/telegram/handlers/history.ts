@@ -5,7 +5,7 @@ import { findPrimaryReportByRunId } from '@/src/db/repositories/reports';
 import { findImportById } from '@/src/db/repositories/imports';
 import { loadFile } from '@/src/lib/ingestion/storage';
 import { msg } from '@/src/lib/telegram/messages.ru';
-import { hasBusinessFeatures } from '@/src/lib/billing/tariffs';
+import { hasExportAccess } from '@/src/lib/billing/tariffs';
 import type { BotContext } from '@/src/lib/telegram/router';
 
 function fmtDate(d: string | Date): string {
@@ -125,8 +125,8 @@ export async function handleHistoryReport(ctx: BotContext, runId: string): Promi
     [{ text: msg.downloadBankFileButton, callback_data: `download_bank:${runId}` }],
   ];
 
-  // Кнопка экспорта только для BUSINESS
-  if (hasBusinessFeatures(user.tariff)) {
+  // Кнопка экспорта для BUSINESS или PRO с аддоном
+  if (hasExportAccess(user)) {
     keyboardRows.push([{ text: '⤵️ Экспортировать', callback_data: `export_menu:${runId}` }]);
   }
 
