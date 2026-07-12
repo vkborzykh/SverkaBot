@@ -94,6 +94,7 @@ export const bankCompletedKeyboard = {
 export const reconciliationFinishedKeyboard = {
   reply_markup: {
     inline_keyboard: [
+      [{ text: '📩 Текст претензии', callback_data: 'claim_text' }],
       [{ text: '🆕 Начать новую сверку', callback_data: 'new_reconciliation' }],
     ],
   },
