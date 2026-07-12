@@ -6,6 +6,7 @@ import { handleReportExport } from './handlers/reportExport';
 import { handleSubscriptionReminder } from './handlers/subscriptionReminder';
 import { handleInactivityReminder } from './handlers/inactivityReminder';
 import { handleFileCleanup } from './handlers/fileCleanup';
+import { handleWeeklyDigest } from './handlers/weeklyDigest';
 
 export function dispatch(job: Job): Promise<void> {
   switch (job.job_type) {
@@ -23,6 +24,8 @@ export function dispatch(job: Job): Promise<void> {
       return handleInactivityReminder(job);
     case 'file_cleanup':
       return handleFileCleanup(job);
+    case 'weekly_digest':
+      return handleWeeklyDigest(job);
     default:
       throw new Error(`Unknown job type: ${job.job_type}`);
   }
