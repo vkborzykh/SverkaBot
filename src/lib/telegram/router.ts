@@ -16,7 +16,7 @@ import { handleHelp } from './handlers/stubs';
 import { handleDeleteMyData, handleDeleteConfirm, handleDeleteCancel } from './handlers/deleteData';
 import { handleSubscribe, handleReferral, handleTariffChoice, handleTariffPeriod, handleExportAddon } from './handlers/subscribe';
 import { handleClaimText } from './handlers/claim';
-import { handleSummaryExport } from './handlers/summaryExport';
+// import { handleSummaryExport } from './handlers/summaryExport'; // Временно отключен для восстановления работы бота
 import { handleRetryImport } from './handlers/retryImport';
 import { handleCancel } from './handlers/cancelOp';
 import {
@@ -326,11 +326,7 @@ export async function routeUpdate(
     const data = 'data' in cbq ? cbq.data : undefined;
     if (!data) return;
 
-    if (data.startsWith('summary_export:')) {
-      const cabinetId = data.slice('summary_export:'.length);
-      await handleSummaryExport(ctx as any, cabinetId === 'all' ? undefined : cabinetId);
-      return;
-    }
+    // case 'summary_export:' временно отключен
     if (data.startsWith('tariff_period:')) {
       const rest = data.slice('tariff_period:'.length);
       const [tariffKey, period] = rest.split(':');
