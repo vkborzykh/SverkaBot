@@ -8,19 +8,19 @@ import type { Tariff } from '@/src/lib/billing/tariffs';
 const TARIFFS: Record<Tariff, { priceKopeks: number; annualPriceKopeks: number; label: string; desc: string }> = {
   START: {
     priceKopeks: 99_000,
-    annualPriceKopeks: Math.round(99_000 * 12 * 0.8), // 950 400
+    annualPriceKopeks: Math.round(99_000 * 12 * 0.8),
     label: '🚀 Старт',
     desc: '30 дней, до 8 сверок в месяц',
   },
   PRO: {
     priceKopeks: 199_000,
-    annualPriceKopeks: Math.round(199_000 * 12 * 0.8), // 1 910 400
+    annualPriceKopeks: Math.round(199_000 * 12 * 0.8),
     label: '⚡ Профи',
     desc: '30 дней, безлимит, Статистика, до 2 кабинетов',
   },
   BUSINESS: {
     priceKopeks: 499_000,
-    annualPriceKopeks: Math.round(499_000 * 12 * 0.8), // 4 790 400
+    annualPriceKopeks: Math.round(499_000 * 12 * 0.8),
     label: '💼 Бизнес',
     desc: '30 дней, до 5 кабинетов, экспорт (CSV/XLSX/1С), хранение 365 дней',
   },
@@ -42,7 +42,6 @@ export async function handleSubscribe(ctx: Context): Promise<void> {
     return;
   }
 
-  // Формируем сообщение о текущем статусе
   let statusText: string;
   const now = new Date();
   if (user.subscription_status === 'TRIAL' && user.trial_expires_at) {
@@ -74,14 +73,12 @@ export async function handleSubscribe(ctx: Context): Promise<void> {
 
   await ctx.reply(statusText);
 
-  // Кнопки выбора тарифа (при нажатии покажем выбор периода)
   const keyboard: { text: string; callback_data: string }[][] = [
     [{ text: `${TARIFFS.START.label} – 990 ₽/мес`, callback_data: 'tariff_choice:START' }],
     [{ text: `${TARIFFS.PRO.label} – 1 990 ₽/мес`, callback_data: 'tariff_choice:PRO' }],
     [{ text: `${TARIFFS.BUSINESS.label} – 4 990 ₽/мес`, callback_data: 'tariff_choice:BUSINESS' }],
   ];
 
-  // Если у пользователя PRO и нет активного аддона, показываем кнопку покупки аддона
   if (user.tariff === 'PRO' && !user.export_addon_active) {
     keyboard.push([{ text: '🧩 Экспорт для бухгалтера – 590 ₽/мес', callback_data: 'tariff_export_addon' }]);
   }
@@ -91,7 +88,6 @@ export async function handleSubscribe(ctx: Context): Promise<void> {
   });
 }
 
-/** Показывает выбор периода (месяц/год) для конкретного тарифа */
 export async function handleTariffChoice(ctx: Context, tariffKey: string): Promise<void> {
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user) return;
@@ -117,7 +113,6 @@ export async function handleTariffChoice(ctx: Context, tariffKey: string): Promi
   );
 }
 
-/** Обрабатывает выбор периода и выставляет счёт */
 export async function handleTariffPeriod(ctx: Context, tariffKey: string, period: 'month' | 'year'): Promise<void> {
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user) return;
@@ -134,10 +129,8 @@ export async function handleTariffPeriod(ctx: Context, tariffKey: string, period
 
 async function sendInvoiceForPeriod(ctx: Context, userId: string, tariffKey: Tariff, days: number, priceKopeks: number) {
   const t = TARIFFS[tariffKey];
-  const discountApplied = false; // годовая скидка уже в цене, реферальная проверяется отдельно (ниже)
-
-  // Проверяем реферальную скидку 20% только для месячного периода
   let finalPrice = priceKopeks;
+
   if (days === 30) {
     try {
       const currentUser = await findUserById(userId);
@@ -145,7 +138,6 @@ async function sendInvoiceForPeriod(ctx: Context, userId: string, tariffKey: Tar
         const inviter = await findUserByTelegramId(currentUser.invited_by);
         if (inviter && inviter.subscription_status === 'ACTIVE') {
           finalPrice = Math.round(priceKopeks * 0.8);
-          // discountApplied = true; -- для текста можно добавить
         }
       }
     } catch (e) {
@@ -229,12 +221,23 @@ export async function handleReferral(ctx: Context): Promise<void> {
   const link = `https://t.me/SverkaProBot?start=ref${BigInt(from.id)}`;
   const invitedUsers = await findUsersByInvitedBy(BigInt(from.id));
 
-  await ctx.reply([
+  // Проверяем, активна ли у пользователя платная подписка для получения бонусов
+  const canEarnBonus = user.subscription_status === 'ACTIVE';
+
+  const lines = [
     `🔗 Ваша реферальная ссылка:\n${link}`,
     '',
     `👥 Приглашено пользователей: ${invitedUsers.length}`,
-    '',
-    'За каждого друга, оплатившего подписку, вы получите +14 дней к своей подписке.',
-    'Друзья получают скидку 20% на первый месяц.',
-  ].join('\n'));
+  ];
+
+  if (canEarnBonus) {
+    lines.push('💎 За каждого друга, оплатившего подписку, вы получите +14 дней к своей подписке.');
+    lines.push('Друзья получают скидку 20% на первый месяц.');
+  } else {
+    lines.push('⚠️ Бонусные дни начисляются только при активной платной подписке.');
+    lines.push('Оформите подписку, чтобы получать +14 дней за каждого друга.');
+    lines.push('Друзья получат скидку 20% на первый месяц в любом случае.');
+  }
+
+  await ctx.reply(lines.join('\n'));
 }
