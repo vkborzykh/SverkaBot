@@ -24,7 +24,7 @@ export const deleteConfirmKeyboard = {
 /**
  * Возвращает клавиатуру главного меню в зависимости от тарифа пользователя.
  * Кнопка «Мои кабинеты» видна только на PRO и BUSINESS.
- * Кнопка «📈 Статистика» — только на PRO/BUSINESS.
+ * Кнопка «📈 Статистика» – только на PRO/BUSINESS.
  */
 export function getMainMenuKeyboard(userTariff?: string | null) {
   const secondRow = [msg.menuSubscribe];
@@ -91,14 +91,20 @@ export const bankCompletedKeyboard = {
   },
 };
 
-export const reconciliationFinishedKeyboard = {
-  reply_markup: {
-    inline_keyboard: [
-      [{ text: '📩 Текст претензии', callback_data: 'claim_text' }],
-      [{ text: '🆕 Начать новую сверку', callback_data: 'new_reconciliation' }],
-    ],
-  },
-};
+/**
+ * Формирует клавиатуру, показываемую после завершения сверки.
+ * Кнопка «Текст претензии» получает идентификатор сверки для дальнейшей обработки.
+ */
+export function getReconciliationFinishedKeyboard(runId: string) {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '📩 Текст претензии', callback_data: `claim_text:${runId}` }],
+        [{ text: '🆕 Начать новую сверку', callback_data: 'new_reconciliation' }],
+      ],
+    },
+  };
+}
 
 export const replaceWbInlineKeyboard = {
   reply_markup: {
