@@ -13,16 +13,12 @@ function rub(kopeks: bigint): string {
   return `${neg ? '−' : ''}${whole},${cents}\u00A0₽`;
 }
 
-/**
- * Оставляет только уникальные сверки по паре (wb_import_id, bank_import_id).
- * Из дубликатов сохраняется самая поздняя (по created_at).
- */
 function uniqueRunsByImports(runs: any[]): any[] {
   const seen = new Set<string>();
   const sorted = [...runs].sort((a, b) => {
     const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
     const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-    return tb - ta; // сначала новые
+    return tb - ta;
   });
   const result: any[] = [];
   for (const run of sorted) {
@@ -32,7 +28,7 @@ function uniqueRunsByImports(runs: any[]): any[] {
       result.push(run);
     }
   }
-  return result; // порядок не важен, но для вычислений можно сохранить как есть
+  return result;
 }
 
 function buildStatisticsLines(runs: any[], label?: string): string[] {
@@ -68,6 +64,83 @@ function buildStatisticsLines(runs: any[], label?: string): string[] {
   ];
 }
 
+/** Генерирует URL столбчатой диаграммы через QuickChart, показывая ожидаемые/полученные суммы и расхождения по последним сверкам. */
+function generateChartUrl(runs: any[]): string {
+  // Оставляем до 12 последних сверок (по дате завершения)
+  const sorted = [...runs].sort((a, b) => {
+    const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return ta - tb; // сначала старые
+  });
+  const lastRuns = sorted.slice(-12);
+
+  const labels = lastRuns.map((r) => {
+    const d = r.created_at ? new Date(r.created_at) : new Date();
+    return `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}`;
+  });
+
+  const expectedData = lastRuns.map((r) => Number(r.turnover_kopeks ?? 0) / 100);
+  const receivedData = lastRuns.map((r) => (Number(r.turnover_kopeks ?? 0) - Number(r.loss_kopeks ?? 0)) / 100);
+  const lossData = lastRuns.map((r) => Number(r.loss_kopeks ?? 0) / 100);
+
+  const chart = {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Ожидалось (₽)',
+          data: expectedData,
+          backgroundColor: 'rgba(54, 162, 235, 0.7)',
+        },
+        {
+          label: 'Поступило (₽)',
+          data: receivedData,
+          backgroundColor: 'rgba(75, 192, 192, 0.7)',
+        },
+        {
+          label: 'Расхождение (₽)',
+          data: lossData,
+          backgroundColor: 'rgba(255, 99, 132, 0.7)',
+        },
+      ],
+    },
+    options: {
+      plugins: {
+        title: {
+          display: true,
+          text: 'Динамика выплат',
+        },
+      },
+      scales: {
+        x: { stacked: false },
+        y: { stacked: false, beginAtZero: true },
+      },
+    },
+  };
+
+  const encoded = encodeURIComponent(JSON.stringify(chart));
+  return `https://quickchart.io/chart?c=${encoded}&width=600&height=400`;
+}
+
+async function sendPhotoToUser(telegramId: bigint, photoUrl: string, caption?: string): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: String(telegramId),
+        photo: photoUrl,
+        caption: caption || '',
+      }),
+    });
+  } catch (err) {
+    console.error('[sendPhotoToUser] error:', err);
+  }
+}
+
 export async function handleStatistics(ctx: Context): Promise<void> {
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user) {
@@ -88,29 +161,35 @@ export async function handleStatistics(ctx: Context): Promise<void> {
     return;
   }
 
-  // Убираем дубликаты по паре импортов
   const uniqueCompleted = uniqueRunsByImports(completed);
 
-  const cabinets = await findCabinetsByUserId(user.id);
+  // Отправляем текстовую сводку
+  const lines = buildStatisticsLines(uniqueCompleted);
+  await ctx.reply(lines.join('\n'));
 
-  if (cabinets.length === 0) {
-    await ctx.reply(buildStatisticsLines(uniqueCompleted).join('\n'));
-    return;
+  // Отправляем график, если есть завершённые сверки
+  if (uniqueCompleted.length > 0) {
+    const chartUrl = generateChartUrl(uniqueCompleted);
+    await sendPhotoToUser(user.telegram_id!, chartUrl, 'График последних сверок');
   }
 
-  const filterButtons = cabinets.map((c) => ({
-    text: msg.statisticsCabinetLabel(c.name),
-    callback_data: `statistics_cabinet:${c.id}`,
-  }));
+  // Фильтр по кабинетам, если есть
+  const cabinets = await findCabinetsByUserId(user.id);
+  if (cabinets.length > 0) {
+    const filterButtons = cabinets.map((c) => ({
+      text: msg.statisticsCabinetLabel(c.name),
+      callback_data: `statistics_cabinet:${c.id}`,
+    }));
 
-  await ctx.reply('Выберите кабинет для детализации:', {
-    reply_markup: {
-      inline_keyboard: [
-        ...filterButtons.map((btn) => [btn]),
-        [{ text: msg.statisticsFilterAll, callback_data: 'statistics_all' }],
-      ],
-    },
-  });
+    await ctx.reply('Выберите кабинет для детализации:', {
+      reply_markup: {
+        inline_keyboard: [
+          ...filterButtons.map((btn) => [btn]),
+          [{ text: msg.statisticsFilterAll, callback_data: 'statistics_all' }],
+        ],
+      },
+    });
+  }
 }
 
 export async function handleStatisticsFilter(ctx: Context, cabinetId?: string): Promise<void> {
@@ -144,9 +223,18 @@ export async function handleStatisticsFilter(ctx: Context, cabinetId?: string): 
     filterLabel = 'Все кабинеты';
   }
 
-  // Применяем дедупликацию после фильтрации по кабинету
   const uniqueFiltered = uniqueRunsByImports(filtered);
 
+  if (uniqueFiltered.length === 0) {
+    await ctx.reply('Нет данных для выбранного кабинета.');
+    return;
+  }
+
+  // Текстовая сводка
   const lines = buildStatisticsLines(uniqueFiltered, filterLabel);
   await ctx.reply(lines.join('\n'));
+
+  // График по отфильтрованным данным
+  const chartUrl = generateChartUrl(uniqueFiltered);
+  await sendPhotoToUser(user.telegram_id!, chartUrl, `График по кабинету: ${filterLabel}`);
 }
