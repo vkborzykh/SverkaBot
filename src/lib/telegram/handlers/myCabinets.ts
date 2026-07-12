@@ -18,6 +18,7 @@ function cabinetsKeyboard(
   cabinets: WbCabinet[],
   canAdd: boolean,
   showUpgrade: boolean,
+  isBusiness: boolean,
   currentCabinetId?: string | null,
 ) {
   const rows: { text: string; callback_data: string }[][] = [];
@@ -31,6 +32,9 @@ function cabinetsKeyboard(
   }
   if (canAdd) {
     rows.push([{ text: msg.addCabinetButton, callback_data: 'cabinet_add' }]);
+  }
+  if (isBusiness) {
+    rows.push([{ text: '📊 Сводный отчёт (все кабинеты)', callback_data: 'summary_export:all' }]);
   }
   if (showUpgrade) {
     rows.push([{ text: msg.upgradeToBusinessButton, callback_data: 'tariff_business' }]);
@@ -55,11 +59,12 @@ export async function handleMyCabinets(ctx: Context): Promise<void> {
   const limit = cabinetLimitFor(user.tariff);
   const canAdd = cabinets.length < limit;
   const showUpgrade = !canAdd && !hasBusinessFeatures(user.tariff);
+  const isBusiness = hasBusinessFeatures(user.tariff);
   const header =
     cabinets.length > 0
       ? msg.myCabinetsHeader(cabinets.length, limit)
       : msg.myCabinetsEmpty(limit);
-  await ctx.reply(header, cabinetsKeyboard(cabinets, canAdd, showUpgrade, user.current_cabinet_id));
+  await ctx.reply(header, cabinetsKeyboard(cabinets, canAdd, showUpgrade, isBusiness, user.current_cabinet_id));
 }
 
 export async function handleCabinetUse(ctx: Context, cabinetId: string): Promise<void> {
