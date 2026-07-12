@@ -14,7 +14,7 @@ import { handleStatus } from './handlers/status';
 import { handleGetReport } from './handlers/getReport';
 import { handleHelp } from './handlers/stubs';
 import { handleDeleteMyData, handleDeleteConfirm, handleDeleteCancel } from './handlers/deleteData';
-import { handleSubscribe, handleReferral, handleTariffStart, handleTariffPro, handleTariffBusiness } from './handlers/subscribe';
+import { handleSubscribe, handleReferral, handleTariffStart, handleTariffPro, handleTariffBusiness, handleExportAddon } from './handlers/subscribe';
 import { handleClaimText } from './handlers/claim';
 import { handleRetryImport } from './handlers/retryImport';
 import { handleCancel } from './handlers/cancelOp';
@@ -46,7 +46,7 @@ import {
 import { handleStatistics, handleStatisticsFilter } from './handlers/dynamics';
 import { handleExportCommand, handleExportCsv, handleExportXlsx, handleExport1c } from './handlers/exportBusiness';
 import { getMainMenuKeyboard } from './keyboard';
-import { TARIFF_BY_AMOUNT_KOPEKS } from '@/src/lib/billing/tariffs';
+import { TARIFF_BY_AMOUNT_KOPEKS, EXPORT_ADDON_PRICE_KOPEKS } from '@/src/lib/billing/tariffs';
 import { msg } from './messages.ru';
 
 export interface BotContext {
@@ -85,6 +85,34 @@ export async function routeUpdate(
     const sp = update.message.successful_payment;
     const telegramId = BigInt(update.message.chat.id);
 
+    // Проверяем, является ли платеж покупкой аддона
+    if (sp.invoice_payload && sp.invoice_payload.startsWith('addon_export_')) {
+      if (sp.total_amount !== EXPORT_ADDON_PRICE_KOPEKS || sp.currency !== 'RUB') {
+        console.error('[successful_payment] Invalid addon amount', sp.total_amount, sp.currency);
+        return;
+      }
+      try {
+        const user = await findUserByTelegramId(telegramId);
+        if (user && user.tariff === 'PRO') {
+          await updateUser(user.id, { export_addon_active: true });
+          await createBillingTransaction({
+            user_id: user.id,
+            amount_kopeks: BigInt(sp.total_amount),
+            currency: sp.currency,
+            status: 'SUCCESS',
+            provider: 'telegram',
+            provider_tx_id: sp.telegram_payment_charge_id,
+            confirmation_url: null,
+          });
+          await ctx.reply('🧩 Модуль «Экспорт для бухгалтера» подключён! Теперь вам доступен экспорт CSV/XLSX/1С на 30 дней.');
+        }
+      } catch (err) {
+        console.error('[successful_payment] addon activation error:', err);
+      }
+      return;
+    }
+
+    // Обработка обычной подписки
     const tariff = TARIFF_BY_AMOUNT_KOPEKS[sp.total_amount];
     const isValidAmount = tariff || sp.total_amount === 120000;
     if (!isValidAmount || sp.currency !== 'RUB') {
@@ -140,7 +168,6 @@ export async function routeUpdate(
           day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC',
         });
 
-        // Поздравление с кратким описанием тарифа
         let tariffDescription = '';
         if (tariff === 'START') {
           tariffDescription = '🚀 Старт — до 8 сверок в месяц, HTML-отчёт, шаблон претензии.';
@@ -155,7 +182,6 @@ export async function routeUpdate(
           getMainMenuKeyboard(tariff),
         );
 
-        // Предложить сразу начать сверку
         await ctx.reply('Нажмите кнопку ниже, чтобы начать сверку.', {
           reply_markup: {
             inline_keyboard: [[{ text: '🆕 Начать новую сверку', callback_data: 'new_reconciliation' }]],
@@ -347,6 +373,7 @@ export async function routeUpdate(
       case 'tariff_start': await import('./handlers/subscribe').then(m => m.handleTariffStart(ctx as any)); break;
       case 'tariff_pro': await import('./handlers/subscribe').then(m => m.handleTariffPro(ctx as any)); break;
       case 'tariff_business': await import('./handlers/subscribe').then(m => m.handleTariffBusiness(ctx as any)); break;
+      case 'tariff_export_addon': await handleExportAddon(ctx as any); break;
       case 'consent:accept': await handleConsentAccept(ctx as Parameters<typeof handleConsentAccept>[0]); break;
       case 'consent:decline': await handleConsentDecline(ctx as Parameters<typeof handleConsentDecline>[0]); break;
       case 'delete:confirm': await handleDeleteConfirm(ctx as Parameters<typeof handleDeleteConfirm>[0]); break;
