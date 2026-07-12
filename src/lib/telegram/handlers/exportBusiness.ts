@@ -1,9 +1,8 @@
-// src/lib/telegram/handlers/exportBusiness.ts
 import type { Context } from 'telegraf';
 import { msg } from '../messages.ru';
 import { findUserByTelegramId } from '@/src/db/repositories/users';
 import { findRunById } from '@/src/db/repositories/reconciliation-runs';
-import { hasBusinessFeatures } from '@/src/lib/billing/tariffs';
+import { hasExportAccess } from '@/src/lib/billing/tariffs';
 import { buildCsvForRun } from '@/src/lib/reports/exportCsv';
 import { buildXlsxForRun } from '@/src/lib/reports/exportXlsx';
 import { build1cForRun } from '@/src/lib/reports/export1c';
@@ -31,7 +30,7 @@ async function sendMessage(telegramId: bigint, text: string): Promise<void> {
 export async function handleExportCsv(ctx: Context, runId: string): Promise<void> {
   await ctx.answerCbQuery?.();
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
-  if (!user || !hasBusinessFeatures(user.tariff)) {
+  if (!user || !hasExportAccess(user)) {
     await ctx.reply(msg.exportBusinessOnly);
     return;
   }
@@ -54,7 +53,7 @@ export async function handleExportCsv(ctx: Context, runId: string): Promise<void
 export async function handleExportXlsx(ctx: Context, runId: string): Promise<void> {
   await ctx.answerCbQuery?.();
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
-  if (!user || !hasBusinessFeatures(user.tariff)) {
+  if (!user || !hasExportAccess(user)) {
     await ctx.reply(msg.exportBusinessOnly);
     return;
   }
@@ -77,7 +76,7 @@ export async function handleExportXlsx(ctx: Context, runId: string): Promise<voi
 export async function handleExport1c(ctx: Context, runId: string): Promise<void> {
   await ctx.answerCbQuery?.();
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
-  if (!user || !hasBusinessFeatures(user.tariff)) {
+  if (!user || !hasExportAccess(user)) {
     await ctx.reply(msg.exportBusinessOnly);
     return;
   }
