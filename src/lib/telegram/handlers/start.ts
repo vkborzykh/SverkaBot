@@ -38,6 +38,14 @@ export async function handleStart(ctx: Context): Promise<void> {
     return;
   }
 
+  // Тёплое приветствие для новых пользователей
+  await ctx.reply(
+    '👋 Добро пожаловать! Я SverkaBot — персональный аудитор выплат Wildberries. ' +
+    'Я проверю, все ли выплаты WB пришли на ваш счёт, и если что-то не так — сразу подготовлю претензию. ' +
+    'Давайте настроим всё за минуту.',
+  );
+  
+  // Затем запрос согласия с кнопками
   await ctx.reply(msg.welcome, consentKeyboard);
   if (refId) {
     const { setSession } = await import('@/src/lib/telegram/session');
