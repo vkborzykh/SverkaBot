@@ -16,6 +16,7 @@ import { handleHelp } from './handlers/stubs';
 import { handleDeleteMyData, handleDeleteConfirm, handleDeleteCancel } from './handlers/deleteData';
 import { handleSubscribe, handleReferral, handleTariffChoice, handleTariffPeriod, handleExportAddon } from './handlers/subscribe';
 import { handleClaimText } from './handlers/claim';
+import { handleSummaryExport } from './handlers/summaryExport';
 import { handleRetryImport } from './handlers/retryImport';
 import { handleCancel } from './handlers/cancelOp';
 import {
@@ -86,7 +87,6 @@ export async function routeUpdate(
     const sp = update.message.successful_payment;
     const telegramId = BigInt(update.message.chat.id);
 
-    // Проверяем, является ли платеж покупкой аддона
     if (sp.invoice_payload && sp.invoice_payload.startsWith('addon_export_')) {
       if (sp.total_amount !== EXPORT_ADDON_PRICE_KOPEKS || sp.currency !== 'RUB') {
         console.error('[successful_payment] Invalid addon amount', sp.total_amount, sp.currency);
@@ -113,21 +113,18 @@ export async function routeUpdate(
       return;
     }
 
-    // Обработка подписки (месяц или год) – извлекаем данные из payload
     try {
       const payload = sp.invoice_payload ?? '';
       let tariffKey: Tariff | null = null;
-      let days = 30; // по умолчанию месяц
+      let days = 30;
 
       if (payload.startsWith('annual_')) {
-        // формат: annual_sub_<userId>_<tariffKey>_<timestamp>
         const parts = payload.replace('annual_', '').split('_');
         if (parts.length >= 3) {
-          tariffKey = parts[2] as Tariff; // parts: ['sub', userId, tariffKey, ...]
+          tariffKey = parts[2] as Tariff;
           days = 365;
         }
       } else if (payload.startsWith('sub_')) {
-        // формат: sub_<userId>_<tariffKey>_<timestamp>
         const parts = payload.split('_');
         if (parts.length >= 3) {
           tariffKey = parts[2] as Tariff;
@@ -329,6 +326,11 @@ export async function routeUpdate(
     const data = 'data' in cbq ? cbq.data : undefined;
     if (!data) return;
 
+    if (data.startsWith('summary_export:')) {
+      const cabinetId = data.slice('summary_export:'.length);
+      await handleSummaryExport(ctx as any, cabinetId === 'all' ? undefined : cabinetId);
+      return;
+    }
     if (data.startsWith('tariff_period:')) {
       const rest = data.slice('tariff_period:'.length);
       const [tariffKey, period] = rest.split(':');
