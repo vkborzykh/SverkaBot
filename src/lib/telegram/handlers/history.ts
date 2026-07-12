@@ -14,11 +14,27 @@ function fmtDate(d: string | Date): string {
   return `${p(dt.getDate())}.${p(dt.getMonth() + 1)}.${dt.getFullYear()}`;
 }
 
+function rub(kopeks: bigint): string {
+  const neg = kopeks < BigInt(0);
+  const abs = neg ? -kopeks : kopeks;
+  const whole = abs / BigInt(100);
+  const cents = abs % BigInt(100);
+  const grouped = whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '\u00A0');
+  return `${neg ? '−' : ''}${grouped},${cents.toString().padStart(2, '0')} ₽`;
+}
+
 async function sendRunList(ctx: BotContext, header: string, runs: any[]) {
-  const buttons = runs.map((r, i) => ({
-    text: `${i + 1}. ${fmtDate(r.created_at)} – ${r.loss_kopeks && BigInt(r.loss_kopeks) > BigInt(0) ? 'недоплата' : 'ок'}`,
-    callback_data: `history_report:${r.id}`,
-  }));
+  const buttons = runs.map((r, i) => {
+    const loss = BigInt(r.loss_kopeks ?? 0);
+    const hasLoss = loss > BigInt(0);
+    const label = hasLoss
+      ? `❗ недоплата ${rub(loss)}`
+      : `✅ без расхождений`;
+    return {
+      text: `${i + 1}. ${fmtDate(r.created_at)} – ${label}`,
+      callback_data: `history_report:${r.id}`,
+    };
+  });
   const inlineKeyboard = buttons.map((btn) => [btn]);
   await ctx.reply(header, { reply_markup: { inline_keyboard: inlineKeyboard } });
 }
