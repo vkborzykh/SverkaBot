@@ -8,6 +8,9 @@ import { enqueue } from '@/src/lib/jobs/queue';
 import { startReconciliation } from '@/src/lib/reconciliation/startRun';
 import { monthlyLimitFor } from '@/src/lib/billing/tariffs';
 import { findCabinetsByUserId, findCabinetById, createCabinet } from '@/src/db/repositories/wb-cabinets';
+import { getDb } from '@/src/db';
+import { reconciliation_runs } from '@/src/db/schema';
+import { eq, and, gte, lte } from 'drizzle-orm';
 
 const TRIAL_LIMIT = 3;
 
@@ -216,11 +219,36 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
     }
     await enqueue('reconcile', result.run_id, { run_id: result.run_id });
 
-    // Увеличиваем счётчик
-    await updateUser(user.id, { monthly_reconciliations: used + 1 });
+    // Проверяем, не была ли уже выполнена успешная сверка с теми же файлами в текущем месяце.
+    // Если была – повторный прогон не расходует квоту.
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+
+    const db = getDb();
+    const existingCompleted = await db
+      .select({ id: reconciliation_runs.id })
+      .from(reconciliation_runs)
+      .where(
+        and(
+          eq(reconciliation_runs.user_id, user.id),
+          eq(reconciliation_runs.wb_import_id, wbImportId),
+          eq(reconciliation_runs.bank_import_id, bankImportId),
+          eq(reconciliation_runs.status, 'COMPLETED'),
+          gte(reconciliation_runs.created_at, startOfMonth),
+          lte(reconciliation_runs.created_at, endOfMonth)
+        )
+      )
+      .limit(1);
+
+    if (existingCompleted.length === 0) {
+      // Увеличиваем счётчик только если это действительно новая пара файлов
+      await updateUser(user.id, { monthly_reconciliations: used + 1 });
+    }
 
     if (user.subscription_status === 'TRIAL') {
-      const remaining = TRIAL_LIMIT - (used + 1);
+      const currentUsed = existingCompleted.length === 0 ? used + 1 : used;
+      const remaining = TRIAL_LIMIT - currentUsed;
       if (remaining > 0) {
         await ctx.reply(`✅ Сверка запущена. Осталось ${remaining} из ${TRIAL_LIMIT} пробных сверок.`);
       } else {
