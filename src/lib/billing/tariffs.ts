@@ -10,6 +10,8 @@ export const TARIFF_PRICES_KOPEKS: Record<Tariff, number> = {
   BUSINESS: 499_000, // 4 990 ₽
 };
 
+export const EXPORT_ADDON_PRICE_KOPEKS = 59_000; // 590 ₽/мес
+
 // Обратная карта для валидации successful_payment (будет использована в router.ts)
 export const TARIFF_BY_AMOUNT_KOPEKS: Record<number, Tariff> = {
   99_000: 'START',
@@ -26,6 +28,13 @@ export function hasProFeatures(tariff: string | null | undefined): boolean {
 /** Функции уровня «Бизнес»: до 5 кабинетов, экспорт, хранение 365 дней. */
 export function hasBusinessFeatures(tariff: string | null | undefined): boolean {
   return tariff === 'BUSINESS';
+}
+
+/** Доступ к экспорту: BUSINESS или PRO с оплаченным аддоном. */
+export function hasExportAccess(user: { tariff?: string | null; export_addon_active?: boolean | null } | null | undefined): boolean {
+  if (!user) return false;
+  if (user.tariff === 'BUSINESS') return true;
+  return user.tariff === 'PRO' && user.export_addon_active === true;
 }
 
 /** Месячный лимит сверок. null = безлимит. */
