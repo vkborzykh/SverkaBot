@@ -133,6 +133,18 @@ export async function handleReconcile(job: Job): Promise<void> {
           user.telegram_id,
           buildUserMessage(result) + '\n\n📄 Готовлю отчёт – он придёт в течение минуты.',
         );
+
+        // Контекстный апселл для тарифа START при обнаружении недоплаты
+        if (
+          user.tariff === 'START' &&
+          result.status === 'underpaid' &&
+          result.discrepancyKopeks > BigInt(0)
+        ) {
+          await notifyUser(
+            user.telegram_id,
+            `💡 В этой сверке – ${rub(result.discrepancyKopeks)} невыясненных сумм. Хотите отслеживать тренд по всем проверкам? Оформите Профи – и получите статистику и безлимитные сверки: /subscribe`,
+          );
+        }
       }
       await clearSession(user.telegram_id);
     }
