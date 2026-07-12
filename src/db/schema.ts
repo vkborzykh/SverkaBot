@@ -50,6 +50,7 @@ export const users = pgTable(
     monthly_reconciliations: integer('monthly_reconciliations').default(0),
     current_cabinet_id: uuid('current_cabinet_id').references(() => wb_cabinets.id, { onDelete: 'set null' }),
     last_update_id: bigint('last_update_id', { mode: 'bigint' }),
+    export_addon_active: boolean('export_addon_active').notNull().default(false),
     created_at: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
