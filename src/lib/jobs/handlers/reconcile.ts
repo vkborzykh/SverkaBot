@@ -1,5 +1,5 @@
 import type { Job } from '@/src/db/repositories/jobs';
-import { findRunById, updateRun } from '@/src/db/repositories/reconciliation-runs';
+import { findRunById, updateRun, findRunsByUserId } from '@/src/db/repositories/reconciliation-runs';
 import { findUserById } from '@/src/db/repositories/users';
 import { findImportById } from '@/src/db/repositories/imports';
 import { reconcileWbPayout, type WbPayoutResult } from '@/src/lib/reconciliation/wbPayout';
@@ -65,6 +65,21 @@ function hasReportAccess(user: UserRow, now: Date): boolean {
     user.subscription_end_date != null &&
     new Date(user.subscription_end_date) > now;
   return Boolean(isTrialActive || isSubActive);
+}
+
+/** Вычисляет количество последовательных завершённых сверок пользователя без расхождений. */
+async function getStreak(userId: string): Promise<number> {
+  const runs = await findRunsByUserId(userId, 20);
+  let streak = 0;
+  for (const run of runs) {
+    if (run.status === 'COMPLETED' && (run.loss_kopeks ?? BigInt(0)) === BigInt(0)) {
+      streak++;
+    } else if (run.status === 'COMPLETED') {
+      break; // серия прервана расхождением
+    }
+    // не COMPLETED пропускаем (может быть FAILED и т.д.), но серию не прерываем
+  }
+  return streak;
 }
 
 export async function handleReconcile(job: Job): Promise<void> {
@@ -133,6 +148,15 @@ export async function handleReconcile(job: Job): Promise<void> {
           user.telegram_id,
           buildUserMessage(result) + '\n\n📄 Готовлю отчёт – он придёт в течение минуты.',
         );
+
+        // Стрик без расхождений
+        const streak = await getStreak(user.id);
+        if (streak > 0 && result.status === 'reconciled') {
+          await notifyUser(
+            user.telegram_id,
+            `✅ Уже ${streak} ${streak === 1 ? 'сверка' : 'сверки'} подряд без невыясненных сумм!`,
+          );
+        }
 
         // Контекстный апселл для тарифа START при обнаружении недоплаты
         if (
