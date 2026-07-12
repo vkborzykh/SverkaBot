@@ -15,6 +15,7 @@ import { handleGetReport } from './handlers/getReport';
 import { handleHelp } from './handlers/stubs';
 import { handleDeleteMyData, handleDeleteConfirm, handleDeleteCancel } from './handlers/deleteData';
 import { handleSubscribe, handleReferral, handleTariffStart, handleTariffPro, handleTariffBusiness } from './handlers/subscribe';
+import { handleClaimText } from './handlers/claim';
 import { handleRetryImport } from './handlers/retryImport';
 import { handleCancel } from './handlers/cancelOp';
 import {
@@ -265,6 +266,10 @@ export async function routeUpdate(
     const data = 'data' in cbq ? cbq.data : undefined;
     if (!data) return;
 
+    if (data.startsWith('claim_text:')) {
+      await handleClaimText(ctx as any, data.slice('claim_text:'.length));
+      return;
+    }
     if (data.startsWith('cabinet_del:')) {
       await handleCabinetDelete(ctx as any, data.slice('cabinet_del:'.length));
       return;
