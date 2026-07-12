@@ -67,7 +67,6 @@ function hasReportAccess(user: UserRow, now: Date): boolean {
   return Boolean(isTrialActive || isSubActive);
 }
 
-/** Вычисляет количество последовательных завершённых сверок пользователя без расхождений. */
 async function getStreak(userId: string): Promise<number> {
   const runs = await findRunsByUserId(userId, 20);
   let streak = 0;
@@ -75,11 +74,28 @@ async function getStreak(userId: string): Promise<number> {
     if (run.status === 'COMPLETED' && (run.loss_kopeks ?? BigInt(0)) === BigInt(0)) {
       streak++;
     } else if (run.status === 'COMPLETED') {
-      break; // серия прервана расхождением
+      break;
     }
-    // не COMPLETED пропускаем (может быть FAILED и т.д.), но серию не прерываем
   }
   return streak;
+}
+
+/** Проверяет, не является ли текущее расхождение аномально большим по сравнению со средним за последние 3 месяца. */
+async function checkAnomaly(userId: string, currentLoss: bigint): Promise<string | null> {
+  if (currentLoss <= BigInt(0)) return null;
+  const threeMonthsAgo = new Date();
+  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+  const runs = await findRunsByUserId(userId, 100);
+  const historical = runs.filter(
+    (r) => r.status === 'COMPLETED' && r.completed_at && new Date(r.completed_at) >= threeMonthsAgo && r.loss_kopeks !== null && BigInt(r.loss_kopeks) > BigInt(0)
+  );
+  if (historical.length === 0) return null;
+  const totalLoss = historical.reduce((sum, r) => sum + BigInt(r.loss_kopeks!), BigInt(0));
+  const avgLoss = totalLoss / BigInt(historical.length);
+  if (currentLoss > avgLoss * BigInt(2)) {
+    return `⚠️ Необычно большое расхождение: ${rub(currentLoss)} (среднее за 3 месяца – ${rub(avgLoss)}). Возможна ошибка в отчёте WB.`;
+  }
+  return null;
 }
 
 export async function handleReconcile(job: Job): Promise<void> {
@@ -92,12 +108,9 @@ export async function handleReconcile(job: Job): Promise<void> {
   try {
     await updateRun(runId, { status: 'RUNNING', started_at: run.started_at ?? new Date() });
 
-    // Шаг 1/3: анализ WB отчёта
     if (user?.telegram_id) {
       await notifyUser(user.telegram_id, '🔍 Анализирую WB-отчёт (шаг 1/3)');
     }
-
-    // Шаг 2/3: сопоставление с банковской выпиской
     if (user?.telegram_id) {
       await notifyUser(user.telegram_id, '🏦 Сопоставляю с банковской выпиской (шаг 2/3)');
     }
@@ -130,7 +143,6 @@ export async function handleReconcile(job: Job): Promise<void> {
     if (user?.telegram_id) {
       const now = new Date();
       if (hasReportAccess(user, now)) {
-        // Приоритет для BUSINESS
         const priority = hasBusinessFeatures(user.tariff) ? 10 : 100;
         await enqueue('report_export', runId, {
           run_id: runId,
@@ -138,18 +150,13 @@ export async function handleReconcile(job: Job): Promise<void> {
           csv_export: hasBusinessFeatures(user.tariff),
         }, undefined, priority);
 
-        // Шаг 3/3: формирование отчёта
-        await notifyUser(
-          user.telegram_id,
-          '📄 Формирую отчёт (шаг 3/3)',
-        );
+        await notifyUser(user.telegram_id, '📄 Формирую отчёт (шаг 3/3)');
 
         await notifyUser(
           user.telegram_id,
           buildUserMessage(result) + '\n\n📄 Готовлю отчёт – он придёт в течение минуты.',
         );
 
-        // Стрик без расхождений
         const streak = await getStreak(user.id);
         if (streak > 0 && result.status === 'reconciled') {
           await notifyUser(
@@ -158,7 +165,12 @@ export async function handleReconcile(job: Job): Promise<void> {
           );
         }
 
-        // Контекстный апселл для тарифа START при обнаружении недоплаты
+        // Проверка аномалии
+        const anomalyMsg = await checkAnomaly(user.id, lossKopeks);
+        if (anomalyMsg) {
+          await notifyUser(user.telegram_id, anomalyMsg);
+        }
+
         if (
           user.tariff === 'START' &&
           result.status === 'underpaid' &&
