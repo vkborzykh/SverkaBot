@@ -43,9 +43,11 @@ function buildUserMessage(r: WbPayoutResult): string {
       break;
     case 'underpaid':
       message += `\nВозможная недоплата: ${rub(r.discrepancyKopeks)}.`;
+      message += '\n💡 Возможная причина: удержания за логистику, хранение или возвраты.';
       break;
     case 'missing':
       message += '\nПоступлений от Wildberries не найдено.';
+      message += '\n💡 Возможная причина: выплата задержана или поступит позже.';
       break;
   }
   return message;
@@ -80,12 +82,12 @@ export async function handleReconcile(job: Job): Promise<void> {
       await notifyUser(user.telegram_id, '🔍 Анализирую WB-отчёт (шаг 1/3)');
     }
 
-    const result = await reconcileWbPayout(run);
-
     // Шаг 2/3: сопоставление с банковской выпиской
     if (user?.telegram_id) {
       await notifyUser(user.telegram_id, '🏦 Сопоставляю с банковской выпиской (шаг 2/3)');
     }
+
+    const result = await reconcileWbPayout(run);
 
     const turnoverKopeks = result.expectedNetKopeks;
     const diff = result.expectedNetKopeks - result.receivedKopeks;
