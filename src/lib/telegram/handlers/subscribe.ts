@@ -2,12 +2,28 @@
 import type { Context } from 'telegraf';
 import { findUserByTelegramId, findUserById, updateUser, findUsersByInvitedBy } from '@/src/db/repositories/users';
 import { msg } from '../messages.ru';
-import { EXPORT_ADDON_PRICE_KOPEKS } from '@/src/lib/billing/tariffs';
+import { EXPORT_ADDON_PRICE_KOPEKS, TARIFF_PRICES_KOPEKS } from '@/src/lib/billing/tariffs';
+import type { Tariff } from '@/src/lib/billing/tariffs';
 
-const TARIFFS = {
-  START: { priceKopeks: 99000, label: '🚀 Старт', desc: '30 дней, до 8 сверок в месяц' },
-  PRO:   { priceKopeks: 199000, label: '⚡ Профи', desc: '30 дней, безлимит, Статистика, до 2 кабинетов' },
-  BUSINESS: { priceKopeks: 499000, label: '💼 Бизнес', desc: '30 дней, до 5 кабинетов, экспорт (CSV/XLSX/1С), хранение 365 дней' },
+const TARIFFS: Record<Tariff, { priceKopeks: number; annualPriceKopeks: number; label: string; desc: string }> = {
+  START: {
+    priceKopeks: 99_000,
+    annualPriceKopeks: Math.round(99_000 * 12 * 0.8), // 950 400
+    label: '🚀 Старт',
+    desc: '30 дней, до 8 сверок в месяц',
+  },
+  PRO: {
+    priceKopeks: 199_000,
+    annualPriceKopeks: Math.round(199_000 * 12 * 0.8), // 1 910 400
+    label: '⚡ Профи',
+    desc: '30 дней, безлимит, Статистика, до 2 кабинетов',
+  },
+  BUSINESS: {
+    priceKopeks: 499_000,
+    annualPriceKopeks: Math.round(499_000 * 12 * 0.8), // 4 790 400
+    label: '💼 Бизнес',
+    desc: '30 дней, до 5 кабинетов, экспорт (CSV/XLSX/1С), хранение 365 дней',
+  },
 };
 
 function formatDate(date: Date): string {
@@ -58,11 +74,11 @@ export async function handleSubscribe(ctx: Context): Promise<void> {
 
   await ctx.reply(statusText);
 
-  // Кнопки тарифов
+  // Кнопки выбора тарифа (при нажатии покажем выбор периода)
   const keyboard: { text: string; callback_data: string }[][] = [
-    [{ text: `${TARIFFS.START.label} – 990 ₽/мес (8 сверок)`, callback_data: 'tariff_start' }],
-    [{ text: `${TARIFFS.PRO.label} – 1 990 ₽/мес (безлимит)`, callback_data: 'tariff_pro' }],
-    [{ text: `${TARIFFS.BUSINESS.label} – 4 990 ₽/мес (до 5 кабинетов, экспорт)`, callback_data: 'tariff_business' }],
+    [{ text: `${TARIFFS.START.label} – 990 ₽/мес`, callback_data: 'tariff_choice:START' }],
+    [{ text: `${TARIFFS.PRO.label} – 1 990 ₽/мес`, callback_data: 'tariff_choice:PRO' }],
+    [{ text: `${TARIFFS.BUSINESS.label} – 4 990 ₽/мес`, callback_data: 'tariff_choice:BUSINESS' }],
   ];
 
   // Если у пользователя PRO и нет активного аддона, показываем кнопку покупки аддона
@@ -75,45 +91,86 @@ export async function handleSubscribe(ctx: Context): Promise<void> {
   });
 }
 
-async function sendInvoice(ctx: Context, userId: string, tariffKey: keyof typeof TARIFFS) {
-  const t = TARIFFS[tariffKey];
-  let priceKopeks = t.priceKopeks;
-  let discountApplied = false;
+/** Показывает выбор периода (месяц/год) для конкретного тарифа */
+export async function handleTariffChoice(ctx: Context, tariffKey: string): Promise<void> {
+  const user = await findUserByTelegramId(BigInt(ctx.from!.id));
+  if (!user) return;
 
-  // Проверяем реферальную скидку 20%
-  try {
-    const currentUser = await findUserById(userId);
-    if (currentUser && currentUser.invited_by) {
-      const inviter = await findUserByTelegramId(currentUser.invited_by);
-      if (inviter && inviter.subscription_status === 'ACTIVE') {
-        priceKopeks = Math.round(t.priceKopeks * 0.8);
-        discountApplied = true;
+  const t = TARIFFS[tariffKey as Tariff];
+  if (!t) return;
+
+  const monthPrice = (t.priceKopeks / 100).toFixed(0);
+  const yearPrice = (t.annualPriceKopeks / 100).toFixed(0);
+  const monthEconomy = ((t.priceKopeks * 12 - t.annualPriceKopeks) / 100).toFixed(0);
+
+  await ctx.answerCbQuery();
+  await ctx.reply(
+    `Вы выбрали тариф «${t.label}».\nВыберите период подписки:`,
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: `📅 Месяц – ${monthPrice} ₽`, callback_data: `tariff_period:${tariffKey}:month` }],
+          [{ text: `📆 Год – ${yearPrice} ₽ (экономия ${monthEconomy} ₽)`, callback_data: `tariff_period:${tariffKey}:year` }],
+        ],
+      },
+    },
+  );
+}
+
+/** Обрабатывает выбор периода и выставляет счёт */
+export async function handleTariffPeriod(ctx: Context, tariffKey: string, period: 'month' | 'year'): Promise<void> {
+  const user = await findUserByTelegramId(BigInt(ctx.from!.id));
+  if (!user) return;
+
+  const t = TARIFFS[tariffKey as Tariff];
+  if (!t) return;
+
+  const days = period === 'year' ? 365 : 30;
+  const amount = period === 'year' ? t.annualPriceKopeks : t.priceKopeks;
+
+  await ctx.answerCbQuery();
+  await sendInvoiceForPeriod(ctx, user.id, tariffKey as Tariff, days, amount);
+}
+
+async function sendInvoiceForPeriod(ctx: Context, userId: string, tariffKey: Tariff, days: number, priceKopeks: number) {
+  const t = TARIFFS[tariffKey];
+  const discountApplied = false; // годовая скидка уже в цене, реферальная проверяется отдельно (ниже)
+
+  // Проверяем реферальную скидку 20% только для месячного периода
+  let finalPrice = priceKopeks;
+  if (days === 30) {
+    try {
+      const currentUser = await findUserById(userId);
+      if (currentUser && currentUser.invited_by) {
+        const inviter = await findUserByTelegramId(currentUser.invited_by);
+        if (inviter && inviter.subscription_status === 'ACTIVE') {
+          finalPrice = Math.round(priceKopeks * 0.8);
+          // discountApplied = true; -- для текста можно добавить
+        }
       }
+    } catch (e) {
+      console.error('Referral discount check failed:', e);
     }
-  } catch (e) {
-    // при ошибке проверки скидка не применяется
-    console.error('Referral discount check failed:', e);
   }
 
-  const description = discountApplied
-    ? `${t.desc} (скидка 20% за друга)`
-    : t.desc;
+  const periodLabel = days === 365 ? '(год)' : '(месяц)';
+  const payload = `${days === 365 ? 'annual_' : ''}sub_${userId}_${tariffKey}_${Date.now()}`;
 
   await ctx.replyWithInvoice({
-    title: `Подписка SverkaBot – ${t.label}`,
-    description,
-    payload: `sub_${userId}_${tariffKey}_${Date.now()}`,
+    title: `Подписка SverkaBot – ${t.label} ${periodLabel}`,
+    description: t.desc,
+    payload,
     provider_token: process.env.TELEGRAM_PROVIDER_TOKEN!,
     currency: 'RUB',
-    prices: [{ label: t.label, amount: priceKopeks }],
+    prices: [{ label: t.label, amount: finalPrice }],
     need_email: true,
     send_email_to_provider: true,
     provider_data: {
       receipt: {
         items: [{
-          description: `Подписка SverkaBot ${t.label}`,
+          description: `Подписка SverkaBot ${t.label} ${periodLabel}`,
           quantity: '1.00',
-          amount: { value: (priceKopeks / 100).toFixed(2), currency: 'RUB' },
+          amount: { value: (finalPrice / 100).toFixed(2), currency: 'RUB' },
           vat_code: 1,
         }],
       },
@@ -142,39 +199,6 @@ async function sendExportAddonInvoice(ctx: Context, userId: string) {
       },
     },
   });
-}
-
-export async function handleTariffStart(ctx: Context): Promise<void> {
-  const user = await findUserByTelegramId(BigInt(ctx.from!.id));
-  if (!user) return;
-  if (user.tariff === 'START') {
-    await ctx.answerCbQuery(msg.tariffAlreadyActive, { show_alert: true });
-    return;
-  }
-  await ctx.answerCbQuery();
-  await sendInvoice(ctx, user.id, 'START');
-}
-
-export async function handleTariffPro(ctx: Context): Promise<void> {
-  const user = await findUserByTelegramId(BigInt(ctx.from!.id));
-  if (!user) return;
-  if (user.tariff === 'PRO') {
-    await ctx.answerCbQuery(msg.tariffAlreadyActive, { show_alert: true });
-    return;
-  }
-  await ctx.answerCbQuery();
-  await sendInvoice(ctx, user.id, 'PRO');
-}
-
-export async function handleTariffBusiness(ctx: Context): Promise<void> {
-  const user = await findUserByTelegramId(BigInt(ctx.from!.id));
-  if (!user) return;
-  if (user.tariff === 'BUSINESS') {
-    await ctx.answerCbQuery(msg.tariffAlreadyActive, { show_alert: true });
-    return;
-  }
-  await ctx.answerCbQuery();
-  await sendInvoice(ctx, user.id, 'BUSINESS');
 }
 
 export async function handleExportAddon(ctx: Context): Promise<void> {
