@@ -74,7 +74,19 @@ export async function handleReconcile(job: Job): Promise<void> {
   const user = await findUserById(run.user_id);
   try {
     await updateRun(runId, { status: 'RUNNING', started_at: run.started_at ?? new Date() });
+
+    // Шаг 1/3: анализ WB отчёта
+    if (user?.telegram_id) {
+      await notifyUser(user.telegram_id, '🔍 Анализирую WB-отчёт (шаг 1/3)');
+    }
+
     const result = await reconcileWbPayout(run);
+
+    // Шаг 2/3: сопоставление с банковской выпиской
+    if (user?.telegram_id) {
+      await notifyUser(user.telegram_id, '🏦 Сопоставляю с банковской выпиской (шаг 2/3)');
+    }
+
     const turnoverKopeks = result.expectedNetKopeks;
     const diff = result.expectedNetKopeks - result.receivedKopeks;
     const lossKopeks = diff > BigInt(0) ? diff : BigInt(0);
@@ -97,6 +109,7 @@ export async function handleReconcile(job: Job): Promise<void> {
       loss_kopeks: lossKopeks,
       loss_percent: lossPercent,
     });
+
     if (user?.telegram_id) {
       const now = new Date();
       if (hasReportAccess(user, now)) {
@@ -107,6 +120,13 @@ export async function handleReconcile(job: Job): Promise<void> {
           google_sheets: hasProFeatures(user.tariff),
           csv_export: hasBusinessFeatures(user.tariff),
         }, undefined, priority);
+
+        // Шаг 3/3: формирование отчёта
+        await notifyUser(
+          user.telegram_id,
+          '📄 Формирую отчёт (шаг 3/3)',
+        );
+
         await notifyUser(
           user.telegram_id,
           buildUserMessage(result) + '\n\n📄 Готовлю отчёт – он придёт в течение минуты.',
