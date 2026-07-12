@@ -139,10 +139,28 @@ export async function routeUpdate(
         const formatted = endDate.toLocaleDateString('ru-RU', {
           day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC',
         });
-        await ctx.reply(`Оплата прошла успешно! Ваша подписка активна до ${formatted}. Спасибо!`);
 
-        // Обновляем главное меню, чтобы сразу показать кнопку «Статистика» для PRO/BUSINESS
-        await ctx.reply('Главное меню обновлено.', getMainMenuKeyboard(tariff));
+        // Поздравление с кратким описанием тарифа
+        let tariffDescription = '';
+        if (tariff === 'START') {
+          tariffDescription = '🚀 Старт — до 8 сверок в месяц, HTML-отчёт, шаблон претензии.';
+        } else if (tariff === 'PRO') {
+          tariffDescription = '⚡️ Профи — безлимитные сверки, статистика, до 2 кабинетов WB.';
+        } else if (tariff === 'BUSINESS') {
+          tariffDescription = '💼 Бизнес — безлимитные сверки, до 5 кабинетов, экспорт (CSV/XLSX/1С), приоритетная обработка.';
+        }
+
+        await ctx.reply(
+          `🎉 Оплата прошла успешно! Ваша подписка активна до ${formatted}.\n\n${tariffDescription}\n\nПодробнее о возможностях: /help`,
+          getMainMenuKeyboard(tariff),
+        );
+
+        // Предложить сразу начать сверку
+        await ctx.reply('Нажмите кнопку ниже, чтобы начать сверку.', {
+          reply_markup: {
+            inline_keyboard: [[{ text: '🆕 Начать новую сверку', callback_data: 'new_reconciliation' }]],
+          },
+        });
       }
     } catch (err) {
       console.error('[successful_payment] error:', err);
