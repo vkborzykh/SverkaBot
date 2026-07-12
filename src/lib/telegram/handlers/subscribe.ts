@@ -2,6 +2,7 @@
 import type { Context } from 'telegraf';
 import { findUserByTelegramId, findUserById, updateUser, findUsersByInvitedBy } from '@/src/db/repositories/users';
 import { msg } from '../messages.ru';
+import { EXPORT_ADDON_PRICE_KOPEKS } from '@/src/lib/billing/tariffs';
 
 const TARIFFS = {
   START: { priceKopeks: 99000, label: '🚀 Старт', desc: '30 дней, до 8 сверок в месяц' },
@@ -56,14 +57,21 @@ export async function handleSubscribe(ctx: Context): Promise<void> {
   }
 
   await ctx.reply(statusText);
+
+  // Кнопки тарифов
+  const keyboard: { text: string; callback_data: string }[][] = [
+    [{ text: `${TARIFFS.START.label} – 990 ₽/мес (8 сверок)`, callback_data: 'tariff_start' }],
+    [{ text: `${TARIFFS.PRO.label} – 1 990 ₽/мес (безлимит)`, callback_data: 'tariff_pro' }],
+    [{ text: `${TARIFFS.BUSINESS.label} – 4 990 ₽/мес (до 5 кабинетов, экспорт)`, callback_data: 'tariff_business' }],
+  ];
+
+  // Если у пользователя PRO и нет активного аддона, показываем кнопку покупки аддона
+  if (user.tariff === 'PRO' && !user.export_addon_active) {
+    keyboard.push([{ text: '🧩 Экспорт для бухгалтера – 590 ₽/мес', callback_data: 'tariff_export_addon' }]);
+  }
+
   await ctx.reply(msg.chooseTariffPrompt, {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: `${TARIFFS.START.label} – 990 ₽/мес (8 сверок)`, callback_data: 'tariff_start' }],
-        [{ text: `${TARIFFS.PRO.label} – 1 990 ₽/мес (безлимит)`, callback_data: 'tariff_pro' }],
-        [{ text: `${TARIFFS.BUSINESS.label} – 4 990 ₽/мес (до 5 кабинетов, экспорт)`, callback_data: 'tariff_business' }],
-      ],
-    },
+    reply_markup: { inline_keyboard: keyboard },
   });
 }
 
@@ -113,6 +121,29 @@ async function sendInvoice(ctx: Context, userId: string, tariffKey: keyof typeof
   });
 }
 
+async function sendExportAddonInvoice(ctx: Context, userId: string) {
+  await ctx.replyWithInvoice({
+    title: 'SverkaBot – Экспорт для бухгалтера',
+    description: 'Дополнительный модуль экспорта CSV/XLSX/1С на 30 дней (только для тарифа Профи)',
+    payload: `addon_export_${userId}_${Date.now()}`,
+    provider_token: process.env.TELEGRAM_PROVIDER_TOKEN!,
+    currency: 'RUB',
+    prices: [{ label: 'Экспорт для бухгалтера', amount: EXPORT_ADDON_PRICE_KOPEKS }],
+    need_email: true,
+    send_email_to_provider: true,
+    provider_data: {
+      receipt: {
+        items: [{
+          description: 'Экспорт для бухгалтера',
+          quantity: '1.00',
+          amount: { value: (EXPORT_ADDON_PRICE_KOPEKS / 100).toFixed(2), currency: 'RUB' },
+          vat_code: 1,
+        }],
+      },
+    },
+  });
+}
+
 export async function handleTariffStart(ctx: Context): Promise<void> {
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user) return;
@@ -144,6 +175,21 @@ export async function handleTariffBusiness(ctx: Context): Promise<void> {
   }
   await ctx.answerCbQuery();
   await sendInvoice(ctx, user.id, 'BUSINESS');
+}
+
+export async function handleExportAddon(ctx: Context): Promise<void> {
+  const user = await findUserByTelegramId(BigInt(ctx.from!.id));
+  if (!user) return;
+  if (user.tariff !== 'PRO') {
+    await ctx.answerCbQuery('Аддон доступен только на тарифе Профи', { show_alert: true });
+    return;
+  }
+  if (user.export_addon_active) {
+    await ctx.answerCbQuery('У вас уже подключён экспорт', { show_alert: true });
+    return;
+  }
+  await ctx.answerCbQuery();
+  await sendExportAddonInvoice(ctx, user.id);
 }
 
 export async function handleReferral(ctx: Context): Promise<void> {
