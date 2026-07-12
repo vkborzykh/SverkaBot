@@ -275,6 +275,7 @@ export const msg = {
   xlsxCaption: 'Excel-отчёт по сверке.',
   export1cCaption: 'Реестр расхождений для 1С.',
   exportError: 'Не удалось сформировать файл. Попробуйте позже.',
+  csvNotReady: 'Сверка не завершена или данные недоступны для экспорта.',
   exportCsvButton: '📊 CSV',
   exportXlsxButton: '📗 Excel',
   export1cButton: '📁 Для 1С',
