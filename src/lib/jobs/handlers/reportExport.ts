@@ -12,10 +12,28 @@ import { storeReport } from '@/src/lib/ingestion/storage';
 import { buildHtmlReport, type ClaimRow, type ReportTxRow } from '@/src/lib/reports/htmlReport';
 import { clearSession } from '@/src/lib/telegram/session';
 import { msg } from '@/src/lib/telegram/messages.ru';
-import { reconciliationFinishedKeyboard } from '@/src/lib/telegram/keyboard';
+import { getReconciliationFinishedKeyboard } from '@/src/lib/telegram/keyboard';
 import { reportRetentionDaysFor } from '@/src/lib/billing/tariffs';
 
 const MAX_REPORT_ROWS = 500;
+
+async function sendDocumentToUser(telegramId: bigint, buffer: Buffer, filename: string, caption: string): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  try {
+    const blob = new Blob([buffer], { type: 'text/html' });
+    const formData = new FormData();
+    formData.append('chat_id', String(telegramId));
+    formData.append('document', blob, filename);
+    formData.append('caption', caption);
+    await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
+      method: 'POST',
+      body: formData,
+    });
+  } catch (err) {
+    console.error('[reportExport] sendDocumentToUser error:', err);
+  }
+}
 
 async function sendMessageToUser(telegramId: bigint, text: string, keyboard?: any): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -175,18 +193,24 @@ export async function handleReportExport(job: Job): Promise<void> {
     retention_days: retentionDays,
   });
 
-  if (process.env.PUBLIC_URL && process.env.INTERNAL_TOKEN) {
-    try {
-      await fetch(`${process.env.PUBLIC_URL}/api/reports/deliver`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Internal-Token': process.env.INTERNAL_TOKEN },
-        body: JSON.stringify({ run_id: runId }),
-      });
-    } catch (e) { console.error('[reportExport] delivery error:', e); }
-  }
-
+  // Отправляем HTML-отчёт напрямую пользователю, минуя несуществующий внутренний API
   if (user?.telegram_id) {
+    try {
+      await sendDocumentToUser(
+        user.telegram_id,
+        htmlBuffer,
+        `report_${runId.slice(0, 8)}.html`,
+        msg.reportCaption,
+      );
+    } catch (err) {
+      console.error('[reportExport] failed to send report to user:', err);
+    }
+
     await clearSession(user.telegram_id);
-    await sendMessageToUser(user.telegram_id, msg.reconciliationCompleted, reconciliationFinishedKeyboard);
+    await sendMessageToUser(
+      user.telegram_id,
+      msg.reconciliationCompleted,
+      getReconciliationFinishedKeyboard(runId),
+    );
   }
 }
