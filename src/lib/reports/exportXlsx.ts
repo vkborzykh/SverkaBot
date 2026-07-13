@@ -18,16 +18,21 @@
 //   "Отнесено к WB" (да/нет) на каждую банковскую строку. Это не выдуманное
 //   соответствие конкретной WB-строке, а реальный факт, который движок
 //   действительно вычисляет: было ли поступление учтено как WB-платёж.
-// - Денежные суммы теперь через formatRub() (целочисленная арифметика над
-//   копейками) вместо rubNum() = Number(kopeks) / 100, которая могла давать
-//   ошибки округления с плавающей точкой.
+// - Денежные суммы теперь через toRubNumber() (числовые ячейки с форматированием)
+//   вместо formatRub() (текст), что позволяет суммировать и фильтровать в Excel.
 // - "Метаданные": хэш теперь считается от РЕАЛЬНОГО содержимого (сумм и
 //   хэшей строк), а не от runId — раньше sha256(Buffer.from(runId)) не
 //   проверял вообще ничего, так как runId и так известен получателю.
 // - Убрана текстовая заглушка про диаграмму на листе "Сводка".
 
 import * as XLSX from 'xlsx';
-import { getRunAggregates, formatRub, fmtDate } from './runAggregates';
+import {
+  getRunAggregates,
+  formatRub,
+  toRubNumber,
+  applyRubNumberFormat,
+  fmtDate,
+} from './runAggregates';
 
 export async function buildXlsxForRun(runId: string): Promise<Buffer> {
   const agg = await getRunAggregates(runId);
@@ -35,45 +40,52 @@ export async function buildXlsxForRun(runId: string): Promise<Buffer> {
   const wb = XLSX.utils.book_new();
 
   // Лист 1: Сводка
-  const summaryData = [
+  const summaryData: (string | number)[][] = [
     ['ID сверки', agg.runId],
     ['Дата сверки', fmtDate(agg.createdAt)],
     ['Кабинет WB', agg.cabinetName ?? '—'],
     ['Период отчёта WB', `${agg.periodFrom} – ${agg.periodTo}`],
-    ['Ожидалось, руб.', formatRub(agg.expectedKopeks)],
-    ['Получено, руб.', formatRub(agg.receivedKopeks)],
-    ['Разница, руб.', formatRub(agg.diffKopeks)],
+    ['Ожидалось, руб.', toRubNumber(agg.expectedKopeks)],
+    ['Получено, руб.', toRubNumber(agg.receivedKopeks)],
+    ['Разница, руб.', toRubNumber(agg.diffKopeks)],
     ['Статус', agg.statusLabel],
     ['Строк в WB-отчёте', agg.wbTxs.length],
     ['Банковских поступлений, отнесённых к WB', agg.wbBankCredits.length],
     ['Всего банковских операций в выписке', agg.bankTxs.length],
   ];
   const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
+  // Применяем числовой формат для денежных строк (строки 5,6,7 в колонке B)
+  for (const row of [5, 6, 7]) {
+    const cell = wsSummary[`B${row}`];
+    if (cell && cell.t === 'n') cell.z = '#,##0.00;[Red]-#,##0.00';
+  }
   XLSX.utils.book_append_sheet(wb, wsSummary, 'Сводка');
 
-  // Лист 2: WB — исходные данные (полностью, без фильтрации по совпадениям —
-  // это "сырые данные", а не результат сверки)
+  // Лист 2: WB — исходные данные
   const wbHeader = ['Дата', 'Тип операции', 'Референс/номер', 'Описание', 'Сумма, руб.'];
-  const wbData = agg.wbTxs.map(tx => [
+  const wbRows: (string | number)[][] = agg.wbTxs.map(tx => [
     fmtDate(tx.transaction_date),
     tx.direction === 'OUT' ? 'Списание' : 'Начисление',
     tx.reference ?? '',
     tx.description ?? '',
-    formatRub(tx.amount_kopeks ?? BigInt(0)),
+    toRubNumber(tx.amount_kopeks ?? BigInt(0)),
   ]);
-  const wsWb = XLSX.utils.aoa_to_sheet([wbHeader, ...wbData]);
+  const wsWb = XLSX.utils.aoa_to_sheet([wbHeader, ...wbRows]);
+  applyRubNumberFormat(wsWb, ['E'], wbRows.length + 1);
   XLSX.utils.book_append_sheet(wb, wsWb, 'WB — исходные данные');
 
-  // Лист 3: Банк — исходные данные, с честным флагом принадлежности к WB
-  const bankHeader = ['Дата', 'Референс/номер', 'Описание', 'Сумма, руб.', 'Отнесено к WB'];
-  const bankData = agg.bankTxs.map(tx => [
+  // Лист 3: Банк — исходные данные
+  const bankHeader = ['Дата', 'Контрагент', 'Референс/номер', 'Описание', 'Сумма, руб.', 'Отнесено к WB'];
+  const bankRows: (string | number)[][] = agg.bankTxs.map(tx => [
     fmtDate(tx.transaction_date),
+    tx.counterparty ?? '',
     tx.reference ?? '',
     tx.description ?? '',
-    formatRub(tx.amount_kopeks ?? BigInt(0)),
+    toRubNumber(tx.amount_kopeks ?? BigInt(0)),
     agg.matchedBankTxIds.has(tx.id) ? 'Да' : 'Нет',
   ]);
-  const wsBank = XLSX.utils.aoa_to_sheet([bankHeader, ...bankData]);
+  const wsBank = XLSX.utils.aoa_to_sheet([bankHeader, ...bankRows]);
+  applyRubNumberFormat(wsBank, ['E'], bankRows.length + 1);
   XLSX.utils.book_append_sheet(wb, wsBank, 'Банк — исходные данные');
 
   // Лист 4: Метаданные
