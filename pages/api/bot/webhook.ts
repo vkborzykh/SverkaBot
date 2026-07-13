@@ -4,9 +4,14 @@ import type { Update, User as TgUser } from 'telegraf/types';
 import { requireTelegramSecret } from '@/src/lib/guards';
 import { okResponse, errResponse } from '@/src/lib/http';
 import { findUserByTelegramId, updateUser } from '@/src/db/repositories/users';
-import { handleStart } from '@/src/lib/telegram/handlers/start';
 import { drainQueue } from '@/src/lib/jobs/runner';
 import { runBackground } from '@/src/lib/jobs/background';
+import { getSession } from '@/src/lib/telegram/session';
+import { msg } from '@/src/lib/telegram/messages.ru';
+import { getMainMenuKeyboard } from '@/src/lib/telegram/keyboard';
+import { checkAccess, PROTECTED_COMMANDS } from '@/src/lib/telegram/access';
+import { TARIFF_BY_AMOUNT_KOPEKS } from '@/src/lib/billing/tariffs';
+import { createBillingTransaction, findBillingTransactionByProviderTxId } from '@/src/db/repositories/billing-transactions';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === 'GET') {
@@ -49,24 +54,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    // Вместо routeUpdate пробуем вызвать handleStart напрямую для /start
-    if ('message' in update && update.message && 'text' in update.message) {
-      const text = update.message.text.trim();
-      if (text === '/start' || text.startsWith('/start ')) {
-        const ctx = buildStartCtx(update);
-        await handleStart(ctx as any, undefined);
-      } else {
-        // Заглушка для остальных команд
-        const chatId = extractChatId(update);
-        if (chatId && process.env.TELEGRAM_BOT_TOKEN) {
-          await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: chatId, text: 'Бот работает в режиме диагностики' }),
-          });
-        }
-      }
-    }
+    // Маршрутизация команд и колбэков
+    await routeTelegramUpdate(update);
+
   } catch (err) {
     console.error('[webhook] FATAL while processing update:', err);
   }
@@ -74,6 +64,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   runBackground(drainQueue());
   return res.status(200).json({ ok: true });
 }
+
+// ---------- Вспомогательные функции ----------
 
 function extractFrom(update: Update): TgUser | undefined {
   if ('message' in update && update.message && 'from' in update.message) {
@@ -101,32 +93,517 @@ function extractChatId(update: Update): number | undefined {
   return undefined;
 }
 
-function adaptToNextRequest(req: NextApiRequest): any {
-  return {
-    headers: {
-      get: (name: string) => req.headers[name.toLowerCase()] as string | undefined,
-    },
-  };
+function flattenExtra(extra: unknown): Record<string, unknown> {
+  if (!extra || typeof extra !== 'object') return {};
+  const e = extra as Record<string, unknown>;
+  if ('reply_markup' in e) return { reply_markup: e.reply_markup };
+  return e;
 }
 
-function buildStartCtx(update: Update): any {
+function buildContext(update: Update): any {
   const from = extractFrom(update);
   const chatId = extractChatId(update);
   const token = process.env.TELEGRAM_BOT_TOKEN;
 
+  const sendText = async (text: string, extra?: unknown): Promise<unknown> => {
+    if (!chatId || !token) return;
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, ...flattenExtra(extra) }),
+    });
+    if (!res.ok) console.error('[webhook] sendMessage failed:', res.status, await res.text());
+  };
+
+  const cbQueryId =
+    'callback_query' in update && update.callback_query
+      ? update.callback_query.id
+      : undefined;
+
+  const messageId =
+    'callback_query' in update &&
+    update.callback_query &&
+    'message' in update.callback_query &&
+    update.callback_query.message
+      ? update.callback_query.message.message_id
+      : undefined;
+
   return {
     from,
-    message: 'message' in update ? update.message : undefined,
-    reply: async (text: string, extra?: any) => {
+    reply: sendText,
+    answerCbQuery: async (text?: string) => {
+      if (!cbQueryId || !token) return;
+      await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callback_query_id: cbQueryId, text }),
+      });
+    },
+    answerPreCheckoutQuery: async (query: any) => {
+      if (!token) return;
+      await fetch(`https://api.telegram.org/bot${token}/answerPreCheckoutQuery`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pre_checkout_query_id: query.pre_checkout_query_id,
+          ok: query.ok,
+          error_message: query.error_message,
+        }),
+      });
+    },
+    replyWithInvoice: async (invoice: any, extra?: any) => {
       if (!chatId || !token) return;
-      const body: any = { chat_id: chatId, text };
-      if (extra?.reply_markup) body.reply_markup = extra.reply_markup;
-      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      const body: Record<string, unknown> = { chat_id: chatId, ...invoice };
+      if (extra) Object.assign(body, extra);
+      await fetch(`https://api.telegram.org/bot${token}/sendInvoice`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
     },
-    answerCbQuery: async () => {},
+    editMessageReplyMarkup: async (_markup: unknown) => {
+      if (!chatId || !messageId || !token) return;
+      await fetch(`https://api.telegram.org/bot${token}/editMessageReplyMarkup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          message_id: messageId,
+          reply_markup: {},
+        }),
+      });
+    },
+    message:
+      'message' in update && update.message && 'text' in update.message
+        ? { text: update.message.text }
+        : undefined,
+    callbackQuery:
+      'callback_query' in update && update.callback_query
+        ? { data: 'data' in update.callback_query ? update.callback_query.data : undefined }
+        : undefined,
+  };
+}
+
+async function routeTelegramUpdate(update: Update): Promise<void> {
+  const ctx = buildContext(update);
+  const from = ctx.from;
+  const chatId = extractChatId(update);
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+
+  // Pre‑checkout
+  if ('pre_checkout_query' in update && update.pre_checkout_query) {
+    const pq = update.pre_checkout_query;
+    await ctx.answerPreCheckoutQuery({ pre_checkout_query_id: pq.id, ok: true });
+    return;
+  }
+
+  // Successful payment
+  if ('message' in update && update.message && 'successful_payment' in update.message) {
+    const sp = update.message.successful_payment;
+    const telegramId = BigInt(update.message.chat.id);
+
+    // Обработка аддона
+    if (sp.invoice_payload && sp.invoice_payload.startsWith('addon_export_')) {
+      const EXPORT_ADDON_PRICE_KOPEKS = 59_000;
+      if (sp.total_amount !== EXPORT_ADDON_PRICE_KOPEKS || sp.currency !== 'RUB') return;
+      try {
+        const user = await findUserByTelegramId(telegramId);
+        if (user && user.tariff === 'PRO') {
+          await updateUser(user.id, { export_addon_active: true });
+          await createBillingTransaction({
+            user_id: user.id,
+            amount_kopeks: BigInt(sp.total_amount),
+            currency: sp.currency,
+            status: 'SUCCESS',
+            provider: 'telegram',
+            provider_tx_id: sp.telegram_payment_charge_id,
+            confirmation_url: null,
+          });
+          await ctx.reply('🧩 Модуль «Экспорт для бухгалтера» подключён! Теперь вам доступен экспорт CSV/XLSX/1С на 30 дней.');
+        }
+      } catch (err) {
+        console.error('[successful_payment] addon activation error:', err);
+      }
+      return;
+    }
+
+    // Обычная подписка (месяц/год)
+    try {
+      const payload = sp.invoice_payload ?? '';
+      let tariffKey: any = null;
+      let days = 30;
+      if (payload.startsWith('annual_')) {
+        const parts = payload.replace('annual_', '').split('_');
+        if (parts.length >= 3) { tariffKey = parts[2]; days = 365; }
+      } else if (payload.startsWith('sub_')) {
+        const parts = payload.split('_');
+        if (parts.length >= 3) { tariffKey = parts[2]; }
+      }
+
+      if (!tariffKey || !['START', 'PRO', 'BUSINESS'].includes(tariffKey) || sp.currency !== 'RUB') return;
+
+      const user = await findUserByTelegramId(telegramId);
+      if (user) {
+        const existing = await findBillingTransactionByProviderTxId(sp.telegram_payment_charge_id);
+        if (existing) return;
+
+        const { activateSubscription } = await import('@/src/lib/billing/subscription');
+        const endDate = await activateSubscription(user.id, days);
+        await updateUser(user.id, { tariff: tariffKey, monthly_reconciliations: 0 });
+
+        let referralBonusGranted = false;
+        if (user.invited_by) {
+          const referrer = await findUserByTelegramId(user.invited_by);
+          if (referrer?.subscription_status === 'ACTIVE' && referrer.subscription_end_date) {
+            const newEnd = new Date(referrer.subscription_end_date.getTime() + 14 * 24 * 60 * 60 * 1000);
+            await updateUser(referrer.id, { subscription_end_date: newEnd });
+            referralBonusGranted = true;
+            if (token) {
+              fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chat_id: String(user.invited_by), text: '🎉 Ваш друг оформил подписку! Вам начислено +14 дней.' }),
+              }).catch(() => {});
+            }
+          }
+        }
+
+        await createBillingTransaction({
+          user_id: user.id,
+          amount_kopeks: BigInt(sp.total_amount),
+          currency: sp.currency,
+          status: 'SUCCESS',
+          provider: 'telegram',
+          provider_tx_id: sp.telegram_payment_charge_id,
+          confirmation_url: null,
+          referral_bonus_granted: referralBonusGranted,
+        });
+
+        const formatted = endDate.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', timeZone:'UTC' });
+        let desc = '';
+        if (tariffKey === 'START') desc = '🚀 Старт — до 8 сверок в месяц, HTML-отчёт, шаблон претензии.';
+        else if (tariffKey === 'PRO') desc = '⚡️ Профи — безлимитные сверки, статистика, до 2 кабинетов WB.';
+        else if (tariffKey === 'BUSINESS') desc = '💼 Бизнес — безлимитные сверки, до 5 кабинетов, экспорт (CSV/XLSX/1С), приоритетная обработка.';
+        const periodText = days === 365 ? ' (год)' : '';
+        await ctx.reply(`🎉 Оплата прошла успешно! Ваша подписка${periodText} активна до ${formatted}.\n\n${desc}\n\nПодробнее: /help`, getMainMenuKeyboard(tariffKey));
+        await ctx.reply('Нажмите кнопку ниже, чтобы начать сверку.', {
+          reply_markup: { inline_keyboard: [[{ text: '🆕 Начать новую сверку', callback_data: 'new_reconciliation' }]] }
+        });
+      }
+    } catch (err) {
+      console.error('[successful_payment] error:', err);
+    }
+    return;
+  }
+
+  // Сообщение с текстом
+  if ('message' in update && update.message && 'text' in update.message && from) {
+    const text = update.message.text.trim();
+    const telegramId = BigInt(from.id);
+    const sessionState = await getSession(telegramId);
+
+    const commandMap: Record<string, string> = {
+      [msg.menuNewReconciliation]: 'new_reconciliation',
+      [msg.menuSubscribe]: 'subscribe',
+      [msg.menuMyCabinets]: 'my_cabinets',
+      [msg.menuHelp]: 'help',
+      [msg.menuHistory]: 'history',
+      [msg.menuStatistics]: 'statistics',
+      [msg.menuDeleteData]: 'delete_my_data',
+    };
+
+    if (sessionState === 'awaiting_cabinet_name' && !text.startsWith('/') && !commandMap[text]) {
+      const { handleCabinetNameReceived } = await import('@/src/lib/telegram/handlers/myCabinets');
+      await handleCabinetNameReceived(ctx, text);
+      return;
+    }
+
+    let command = '';
+    if (text.startsWith('/')) {
+      command = text.slice(1).split(' ')[0].toLowerCase();
+    } else if (commandMap[text]) {
+      command = commandMap[text];
+    }
+    if (!command) return;
+
+    // /start
+    if (command === 'start') {
+      const user = await findUserByTelegramId(telegramId);
+      const { handleStart } = await import('@/src/lib/telegram/handlers/start');
+      await handleStart(ctx, user?.tariff);
+      return;
+    }
+
+    const user = await findUserByTelegramId(telegramId);
+    if (!user) {
+      const { handleStart } = await import('@/src/lib/telegram/handlers/start');
+      await handleStart(ctx);
+      return;
+    }
+
+    const access = checkAccess(user);
+    if (access !== 'full' && PROTECTED_COMMANDS.has(command)) {
+      await ctx.reply(msg.accessExpired, {
+        reply_markup: { inline_keyboard: [[{ text: '💰 Подписка', callback_data: 'subscribe_inline' }]] }
+      });
+      return;
+    }
+
+    // Обработчики команд
+    switch (command) {
+      case 'subscribe': {
+        const { handleSubscribe } = await import('@/src/lib/telegram/handlers/subscribe');
+        await handleSubscribe(ctx);
+        break;
+      }
+      case 'referral': {
+        const { handleReferral } = await import('@/src/lib/telegram/handlers/subscribe');
+        await handleReferral(ctx);
+        break;
+      }
+      case 'my_cabinets': {
+        const { handleMyCabinets } = await import('@/src/lib/telegram/handlers/myCabinets');
+        await handleMyCabinets(ctx);
+        break;
+      }
+      case 'statistics': {
+        const { handleStatistics } = await import('@/src/lib/telegram/handlers/dynamics');
+        await handleStatistics(ctx);
+        break;
+      }
+      case 'export': {
+        const { handleExportCommand } = await import('@/src/lib/telegram/handlers/exportBusiness');
+        await handleExportCommand(ctx);
+        break;
+      }
+      case 'help': {
+        const { handleHelp } = await import('@/src/lib/telegram/handlers/stubs');
+        await handleHelp(ctx);
+        break;
+      }
+      case 'history': {
+        const { handleHistory } = await import('@/src/lib/telegram/handlers/history');
+        await handleHistory(ctx);
+        break;
+      }
+      case 'delete_my_data': {
+        const { handleDeleteMyData } = await import('@/src/lib/telegram/handlers/deleteData');
+        await handleDeleteMyData(ctx);
+        break;
+      }
+      case 'get_report': {
+        const { handleGetReport } = await import('@/src/lib/telegram/handlers/getReport');
+        await handleGetReport(ctx);
+        break;
+      }
+      case 'new_reconciliation': {
+        const { handleNewReconciliation } = await import('@/src/lib/telegram/handlers/reconciliationFlow');
+        await handleNewReconciliation(ctx, user.id);
+        break;
+      }
+      default: break;
+    }
+  }
+
+  // Файлы (документы)
+  if ('message' in update && update.message && 'document' in update.message && from) {
+    const doc = update.message.document;
+    const telegramId = BigInt(from.id);
+    const sessionState = await getSession(telegramId);
+    const docInfo = { fileId: doc.file_id, fileName: doc.file_name ?? 'file', fileSizeBytes: doc.file_size ?? 0 };
+
+    if (sessionState === 'awaiting_wb_file') {
+      const { handleWbFileReceived } = await import('@/src/lib/telegram/handlers/upload');
+      await handleWbFileReceived(ctx, docInfo);
+    } else if (sessionState === 'awaiting_bank_file') {
+      const { handleBankFileReceived } = await import('@/src/lib/telegram/handlers/upload');
+      await handleBankFileReceived(ctx, docInfo);
+    } else {
+      await ctx.reply(msg.uploadNoSession);
+    }
+  }
+
+  // Колбэки
+  if ('callback_query' in update && update.callback_query) {
+    const cbq = update.callback_query;
+    const data = 'data' in cbq ? cbq.data : undefined;
+    if (!data) return;
+
+    // Выбор тарифа
+    if (data.startsWith('tariff_choice:')) {
+      const { handleTariffChoice } = await import('@/src/lib/telegram/handlers/subscribe');
+      await handleTariffChoice(ctx, data.slice('tariff_choice:'.length));
+      return;
+    }
+    if (data.startsWith('tariff_period:')) {
+      const { handleTariffPeriod } = await import('@/src/lib/telegram/handlers/subscribe');
+      const rest = data.slice('tariff_period:'.length);
+      const [tariffKey, period] = rest.split(':');
+      if (tariffKey && (period === 'month' || period === 'year')) {
+        await handleTariffPeriod(ctx, tariffKey, period);
+      }
+      return;
+    }
+    if (data === 'tariff_export_addon') {
+      const { handleExportAddon } = await import('@/src/lib/telegram/handlers/subscribe');
+      await handleExportAddon(ctx);
+      return;
+    }
+
+    // Клейм текст
+    if (data.startsWith('claim_text:')) {
+      const { handleClaimText } = await import('@/src/lib/telegram/handlers/claim');
+      await handleClaimText(ctx, data.slice('claim_text:'.length));
+      return;
+    }
+
+    // Кабинеты
+    if (data.startsWith('cabinet_del:')) {
+      const { handleCabinetDelete } = await import('@/src/lib/telegram/handlers/myCabinets');
+      await handleCabinetDelete(ctx, data.slice('cabinet_del:'.length));
+      return;
+    }
+    if (data.startsWith('cabinet_pick:')) {
+      const { handleCabinetPick } = await import('@/src/lib/telegram/handlers/reconciliationFlow');
+      await handleCabinetPick(ctx, data.slice('cabinet_pick:'.length));
+      return;
+    }
+    if (data.startsWith('cabinet_use:')) {
+      const { handleCabinetUse } = await import('@/src/lib/telegram/handlers/myCabinets');
+      await handleCabinetUse(ctx, data.slice('cabinet_use:'.length));
+      return;
+    }
+    if (data.startsWith('statistics_cabinet:')) {
+      const { handleStatisticsFilter } = await import('@/src/lib/telegram/handlers/dynamics');
+      await handleStatisticsFilter(ctx, data.slice('statistics_cabinet:'.length));
+      return;
+    }
+    if (data === 'statistics_all') {
+      const { handleStatisticsFilter } = await import('@/src/lib/telegram/handlers/dynamics');
+      await handleStatisticsFilter(ctx, 'all');
+      return;
+    }
+
+    // История и экспорт
+    if (data.startsWith('history_report:')) {
+      const { handleHistoryReport } = await import('@/src/lib/telegram/handlers/history');
+      await handleHistoryReport(ctx, data.slice('history_report:'.length));
+      return;
+    }
+    if (data.startsWith('history_html:')) {
+      const { handleHistoryHtml } = await import('@/src/lib/telegram/handlers/history');
+      await handleHistoryHtml(ctx, data.slice('history_html:'.length));
+      return;
+    }
+    if (data.startsWith('download_wb:')) {
+      const { handleDownloadWb } = await import('@/src/lib/telegram/handlers/history');
+      await handleDownloadWb(ctx, data.slice('download_wb:'.length));
+      return;
+    }
+    if (data.startsWith('download_bank:')) {
+      const { handleDownloadBank } = await import('@/src/lib/telegram/handlers/history');
+      await handleDownloadBank(ctx, data.slice('download_bank:'.length));
+      return;
+    }
+    if (data.startsWith('export_menu:')) {
+      const { handleExportMenu } = await import('@/src/lib/telegram/handlers/history');
+      await handleExportMenu(ctx, data.slice('export_menu:'.length));
+      return;
+    }
+    if (data.startsWith('export_csv:')) {
+      const { handleExportCsv } = await import('@/src/lib/telegram/handlers/exportBusiness');
+      await handleExportCsv(ctx, data.slice('export_csv:'.length));
+      return;
+    }
+    if (data.startsWith('export_xlsx:')) {
+      const { handleExportXlsx } = await import('@/src/lib/telegram/handlers/exportBusiness');
+      await handleExportXlsx(ctx, data.slice('export_xlsx:'.length));
+      return;
+    }
+    if (data.startsWith('export_1c:')) {
+      const { handleExport1c } = await import('@/src/lib/telegram/handlers/exportBusiness');
+      await handleExport1c(ctx, data.slice('export_1c:'.length));
+      return;
+    }
+
+    // Остальные кнопки
+    switch (data) {
+      case 'cabinet_add': {
+        const { handleCabinetAdd } = await import('@/src/lib/telegram/handlers/myCabinets');
+        await handleCabinetAdd(ctx);
+        break;
+      }
+      case 'my_cabinets': {
+        const { handleMyCabinets } = await import('@/src/lib/telegram/handlers/myCabinets');
+        await handleMyCabinets(ctx);
+        break;
+      }
+      case 'consent:accept': {
+        const { handleConsentAccept } = await import('@/src/lib/telegram/handlers/start');
+        await handleConsentAccept(ctx);
+        break;
+      }
+      case 'consent:decline': {
+        const { handleConsentDecline } = await import('@/src/lib/telegram/handlers/start');
+        await handleConsentDecline(ctx);
+        break;
+      }
+      case 'delete:confirm': {
+        const { handleDeleteConfirm } = await import('@/src/lib/telegram/handlers/deleteData');
+        await handleDeleteConfirm(ctx);
+        break;
+      }
+      case 'delete:cancel': {
+        const { handleDeleteCancel } = await import('@/src/lib/telegram/handlers/deleteData');
+        await handleDeleteCancel(ctx);
+        break;
+      }
+      case 'new_reconciliation': {
+        const user = await findUserByTelegramId(BigInt(from!.id));
+        if (user) {
+          const { handleNewReconciliation } = await import('@/src/lib/telegram/handlers/reconciliationFlow');
+          await handleNewReconciliation(ctx, user.id);
+        }
+        break;
+      }
+      case 'upload_wb_inline': {
+        const { handleUploadWbInline } = await import('@/src/lib/telegram/handlers/reconciliationFlow');
+        await handleUploadWbInline(ctx);
+        break;
+      }
+      case 'replace_wb': {
+        const { handleReplaceWb } = await import('@/src/lib/telegram/handlers/reconciliationFlow');
+        await handleReplaceWb(ctx);
+        break;
+      }
+      case 'upload_bank_inline': {
+        const { handleUploadBankInline } = await import('@/src/lib/telegram/handlers/reconciliationFlow');
+        await handleUploadBankInline(ctx);
+        break;
+      }
+      case 'replace_bank': {
+        const { handleReplaceBank } = await import('@/src/lib/telegram/handlers/reconciliationFlow');
+        await handleReplaceBank(ctx);
+        break;
+      }
+      case 'run_sync_inline': {
+        const { handleRunSyncInline } = await import('@/src/lib/telegram/handlers/reconciliationFlow');
+        await handleRunSyncInline(ctx);
+        break;
+      }
+      case 'subscribe_inline': {
+        const { handleSubscribe } = await import('@/src/lib/telegram/handlers/subscribe');
+        await handleSubscribe(ctx);
+        break;
+      }
+    }
+  }
+}
+
+function adaptToNextRequest(req: NextApiRequest): any {
+  return {
+    headers: {
+      get: (name: string) => req.headers[name.toLowerCase()] as string | undefined,
+    },
   };
 }
