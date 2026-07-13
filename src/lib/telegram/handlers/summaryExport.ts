@@ -3,9 +3,7 @@ import type { Context } from 'telegraf';
 import { findUserByTelegramId } from '@/src/db/repositories/users';
 import { findRunsByUserId } from '@/src/db/repositories/reconciliation-runs';
 import { findImportById } from '@/src/db/repositories/imports';
-import { buildCsvForRun } from '@/src/lib/reports/exportCsv';
-import { buildXlsxForRun } from '@/src/lib/reports/exportXlsx';
-import { build1cForRun } from '@/src/lib/reports/export1c';
+import { buildCombinedCsv, buildCombinedXlsx, buildCombined1c } from '@/src/lib/reports/combinedExport';
 import { hasBusinessFeatures } from '@/src/lib/billing/tariffs';
 import type { BotContext } from '../router';
 
@@ -49,11 +47,13 @@ export async function handleSummaryExport(ctx: BotContext, cabinetId?: string): 
     return;
   }
 
+  // Собираем массив run.id для функций сводного экспорта
+  const runIds = filtered.map(r => r.id);
+
   try {
-    // Генерируем все три формата и отправляем отдельными сообщениями
-    const csvBuffer = await buildCombinedCsv(filtered);
-    const xlsxBuffer = await buildCombinedXlsx(filtered);
-    const onecBuffer = await buildCombined1c(filtered);
+    const csvBuffer = await buildCombinedCsv(runIds);
+    const xlsxBuffer = await buildCombinedXlsx(runIds);
+    const onecBuffer = await buildCombined1c(runIds);
 
     await sendDocument(user.telegram_id!, csvBuffer, `Sverka_сводка_${label}_${Date.now()}.csv`, 'text/csv', 'Сводный CSV по всем сверкам');
     await sendDocument(user.telegram_id!, xlsxBuffer, `Sverka_сводка_${label}_${Date.now()}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Сводный Excel');
@@ -62,28 +62,4 @@ export async function handleSummaryExport(ctx: BotContext, cabinetId?: string): 
     console.error('[summaryExport] error:', err);
     await ctx.reply('Не удалось сформировать сводный отчёт. Попробуйте позже.');
   }
-}
-
-async function buildCombinedCsv(runs: any[]): Promise<Buffer> {
-  const buffers: Buffer[] = [];
-  for (const run of runs) {
-    try { buffers.push(await buildCsvForRun(run.id)); } catch {}
-  }
-  return Buffer.concat(buffers);
-}
-
-async function buildCombinedXlsx(runs: any[]): Promise<Buffer> {
-  const buffers: Buffer[] = [];
-  for (const run of runs) {
-    try { buffers.push(await buildXlsxForRun(run.id)); } catch {}
-  }
-  return Buffer.concat(buffers);
-}
-
-async function buildCombined1c(runs: any[]): Promise<Buffer> {
-  const buffers: Buffer[] = [];
-  for (const run of runs) {
-    try { buffers.push(await build1cForRun(run.id)); } catch {}
-  }
-  return Buffer.concat(buffers);
 }
