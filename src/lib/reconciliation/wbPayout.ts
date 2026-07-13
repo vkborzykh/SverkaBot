@@ -61,6 +61,8 @@ export async function reconcileWbPayout(run: ReconciliationRun): Promise<WbPayou
     await createMatchItems(items.slice(i, i + CHUNK));
   }
 
+  // Передаём объект напрямую – drizzle сам вызовет JSON.stringify один раз.
+  // Раньше здесь был явный JSON.stringify, что приводило к двойной сериализации.
   await createEvidence({
     match_id: match.id,
     amount_score: result.finalScore.toFixed(4),
@@ -68,7 +70,7 @@ export async function reconcileWbPayout(run: ReconciliationRun): Promise<WbPayou
     reference_score: '0.0000',
     description_score: '0.0000',
     counterparty_score: '0.0000',
-    penalties: JSON.stringify({
+    penalties: {
       strategy: 'wb_net_payout',
       status: result.status,
       expected_net_kopeks: String(result.expectedNetKopeks),
@@ -77,7 +79,7 @@ export async function reconcileWbPayout(run: ReconciliationRun): Promise<WbPayou
       received_kopeks: String(result.receivedKopeks),
       discrepancy_kopeks: String(result.discrepancyKopeks),
       bank_credit_count: result.bankCreditCount,
-    }),
+    },
   });
 
   return result;
