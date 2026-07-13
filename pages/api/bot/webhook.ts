@@ -429,6 +429,14 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
     const data = 'data' in cbq ? cbq.data : undefined;
     if (!data) return;
 
+    // Сводный экспорт (добавлено)
+    if (data.startsWith('summary_export:')) {
+      const cabinetId = data.slice('summary_export:'.length);
+      const { handleSummaryExport } = await import('@/src/lib/telegram/handlers/summaryExport');
+      await handleSummaryExport(ctx, cabinetId === 'all' ? undefined : cabinetId);
+      return;
+    }
+
     // Выбор тарифа
     if (data.startsWith('tariff_choice:')) {
       const { handleTariffChoice } = await import('@/src/lib/telegram/handlers/subscribe');
