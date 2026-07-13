@@ -31,7 +31,7 @@ export async function handleExportCsv(ctx: Context, runId: string): Promise<void
   await ctx.answerCbQuery?.();
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user || !hasExportAccess(user)) {
-    await ctx.reply(msg.exportBusinessOnly);
+    await ctx.reply(user?.tariff === 'PRO' ? msg.exportNoAccessPro : msg.exportNoAccessOther);
     return;
   }
 
@@ -54,7 +54,7 @@ export async function handleExportXlsx(ctx: Context, runId: string): Promise<voi
   await ctx.answerCbQuery?.();
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user || !hasExportAccess(user)) {
-    await ctx.reply(msg.exportBusinessOnly);
+    await ctx.reply(user?.tariff === 'PRO' ? msg.exportNoAccessPro : msg.exportNoAccessOther);
     return;
   }
 
@@ -77,7 +77,7 @@ export async function handleExport1c(ctx: Context, runId: string): Promise<void>
   await ctx.answerCbQuery?.();
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user || !hasExportAccess(user)) {
-    await ctx.reply(msg.exportBusinessOnly);
+    await ctx.reply(user?.tariff === 'PRO' ? msg.exportNoAccessPro : msg.exportNoAccessOther);
     return;
   }
 
