@@ -26,6 +26,7 @@ import {
 import { findImportById } from '@/src/db/repositories/imports';
 import { findCabinetById } from '@/src/db/repositories/wb-cabinets';
 import { sha256 } from '@/src/lib/ingestion/hash';
+import * as XLSX from 'xlsx';
 
 export type RunAggregateStatus = 'MATCHED' | 'UNDERPAID' | 'OVERPAID' | 'NOT_FOUND';
 
@@ -70,9 +71,32 @@ export function formatRub(kopeks: bigint): string {
   return `${neg ? '-' : ''}${rub},${kop}`;
 }
 
-/** Экранирование текстового поля для CSV/1С (разделитель ';', кавычки, переносы строк). */
+/** Число рублей ТОЛЬКО для числовых ячеек XLSX (Excel сам считает/форматирует).
+ *  Источник истины остаётся bigint-копейками — эта функция не участвует в расчётах,
+ *  только в отображении уже готового значения. */
+export function toRubNumber(kopeks: bigint): number {
+  return Number(kopeks) / 100;
+}
+
+const RUB_NUMFMT = '#,##0.00;[Red]-#,##0.00';
+
+/** Проставляет числовой формат (разряды + 2 знака) на диапазон числовых ячеек. */
+export function applyRubNumberFormat(ws: XLSX.WorkSheet, cols: string[], rowCount: number): void {
+  for (const col of cols) {
+    for (let r = 2; r <= rowCount; r++) {
+      const cell = ws[`${col}${r}`];
+      if (cell && cell.t === 'n') cell.z = RUB_NUMFMT;
+    }
+  }
+}
+
+const RISKY_LEADING_CHARS = /^[=+\-@\t\r]/;
+
+/** Экранирование текстового поля для CSV/1С (разделитель ';', кавычки, переносы строк).
+ *  Добавлена защита от CSV/Excel-инъекции. */
 export function csvCell(v: string | null | undefined): string {
-  const s = (v ?? '').replace(/\r?\n/g, ' ').trim();
+  let s = (v ?? '').replace(/\r?\n/g, ' ').trim();
+  if (RISKY_LEADING_CHARS.test(s)) s = `'${s}`;
   return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
