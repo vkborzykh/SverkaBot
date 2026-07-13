@@ -10,7 +10,7 @@ export async function handleHistory(ctx: Context): Promise<void> {
 }
 
 export async function handleHelp(ctx: Context): Promise<void> {
-  await ctx.reply(msg.helpText);
+  await ctx.reply(msg.helpText, { parse_mode: 'HTML' });
 }
 
 export async function handleGetReport(ctx: Context): Promise<void> {
