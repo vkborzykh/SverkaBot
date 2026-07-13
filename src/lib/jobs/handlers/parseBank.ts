@@ -18,7 +18,7 @@ import { resolveProfile } from '@/src/lib/profiles/resolve';
 import { createDraftProfile } from '@/src/lib/profiles/draft';
 import { normalizeDate } from '@/src/lib/parsing/normalize/dates';
 import { parseAmountToKopeks } from '@/src/lib/parsing/normalize/amounts';
-import { normalizeText } from '@/src/lib/parsing/normalize/text';
+import { normalizeText, normalizeDisplayText } from '@/src/lib/parsing/normalize/text';
 import { sha256 } from '@/src/lib/ingestion/hash';
 import { getSetting } from '@/src/lib/settings/settings';
 import { msg } from '@/src/lib/telegram/messages.ru';
@@ -30,7 +30,6 @@ const PARSER_VERSION = 'bank_v2';
 const ROW_LIMIT = 50_000;
 const INSERT_CHUNK = 2000;
 
-// Regex для распознавания балансовых / итоговых строк (остатки, сальдо и т.п.)
 const NON_TX_PURPOSE = /^(входящий\s+остаток|исходящий\s+остаток|оборот|сальдо|всего|итого|balance|opening|closing)/i;
 
 async function notifyUser(telegramId: bigint, text: string): Promise<void> {
@@ -201,14 +200,12 @@ export async function handleParseBank(job: Job): Promise<void> {
     const rowNumber = header.headerRowIndex + i + 2;
     const rawFragment = JSON.stringify(row).slice(0, 200);
 
-    // Извлекаем сырые значения даты и назначения для проверки на балансовую строку
     const rawDate = cols.date !== null ? row[cols.date] : null;
     const rawPurpose = cols.purpose !== null ? row[cols.purpose] : null;
 
-    // Отбрасываем строки остатков / итогов по назначению или если в колонке даты стоит «Исходящий остаток»
     if ((rawPurpose && NON_TX_PURPOSE.test(rawPurpose)) ||
         (rawDate && NON_TX_PURPOSE.test(rawDate))) {
-      continue; // балансовая строка, пропускаем без ошибок
+      continue;
     }
 
     if (!rawDate) {
@@ -245,9 +242,9 @@ export async function handleParseBank(job: Job): Promise<void> {
       continue;
     }
 
-    const reference = cols.docNumber !== null ? normalizeText(row[cols.docNumber]) || null : null;
-    const description = cols.purpose !== null ? normalizeText(row[cols.purpose]) || null : null;
-    const counterparty = cols.counterparty !== null ? normalizeText(row[cols.counterparty]) || null : null;
+    const reference = cols.docNumber !== null ? normalizeDisplayText(row[cols.docNumber]) || null : null;
+    const description = cols.purpose !== null ? normalizeDisplayText(row[cols.purpose]) || null : null;
+    const counterparty = cols.counterparty !== null ? normalizeDisplayText(row[cols.counterparty]) || null : null;
 
     const rowHash = sha256(Buffer.from(JSON.stringify({ importId, rowNumber, txDate: txDate.toISOString(), amountKopeks: String(amountKopeks), direction, reference })));
 
@@ -307,7 +304,6 @@ export async function handleParseBank(job: Job): Promise<void> {
 
   updateProfileStats(activeProfileId).catch(() => {});
 
-  // Уведомление
   if (user?.telegram_id) {
     try {
       const sessionPayload = await import('@/src/lib/telegram/session').then(m => m.getSessionPayload(user.telegram_id!));
