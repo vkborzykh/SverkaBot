@@ -64,81 +64,17 @@ function buildStatisticsLines(runs: any[], label?: string): string[] {
   ];
 }
 
-/** Генерирует URL столбчатой диаграммы через QuickChart, показывая ожидаемые/полученные суммы и расхождения по последним сверкам. */
-function generateChartUrl(runs: any[]): string {
-  // Оставляем до 12 последних сверок (по дате завершения)
-  const sorted = [...runs].sort((a, b) => {
-    const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
-    const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-    return ta - tb; // сначала старые
-  });
-  const lastRuns = sorted.slice(-12);
-
-  const labels = lastRuns.map((r) => {
-    const d = r.created_at ? new Date(r.created_at) : new Date();
-    return `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}`;
-  });
-
-  const expectedData = lastRuns.map((r) => Number(r.turnover_kopeks ?? 0) / 100);
-  const receivedData = lastRuns.map((r) => (Number(r.turnover_kopeks ?? 0) - Number(r.loss_kopeks ?? 0)) / 100);
-  const lossData = lastRuns.map((r) => Number(r.loss_kopeks ?? 0) / 100);
-
-  const chart = {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [
-        {
-          label: 'Ожидалось (₽)',
-          data: expectedData,
-          backgroundColor: 'rgba(54, 162, 235, 0.7)',
-        },
-        {
-          label: 'Поступило (₽)',
-          data: receivedData,
-          backgroundColor: 'rgba(75, 192, 192, 0.7)',
-        },
-        {
-          label: 'Расхождение (₽)',
-          data: lossData,
-          backgroundColor: 'rgba(255, 99, 132, 0.7)',
-        },
-      ],
+/** Отправляет кнопку с WebApp для интерактивной статистики */
+function sendWebAppButton(ctx: Context, userTelegramId: bigint) {
+  const baseUrl = process.env.PUBLIC_URL || 'https://sverka-bot-3dns.vercel.app';
+  const webAppUrl = `${baseUrl}/miniapp/stats.html`;
+  return ctx.reply('📊 Открыть интерактивную статистику', {
+    reply_markup: {
+      inline_keyboard: [[
+        { text: '📈 Открыть статистику', web_app: { url: webAppUrl } }
+      ]],
     },
-    options: {
-      plugins: {
-        title: {
-          display: true,
-          text: 'Динамика выплат',
-        },
-      },
-      scales: {
-        x: { stacked: false },
-        y: { stacked: false, beginAtZero: true },
-      },
-    },
-  };
-
-  const encoded = encodeURIComponent(JSON.stringify(chart));
-  return `https://quickchart.io/chart?c=${encoded}&width=600&height=400`;
-}
-
-async function sendPhotoToUser(telegramId: bigint, photoUrl: string, caption?: string): Promise<void> {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) return;
-  try {
-    await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: String(telegramId),
-        photo: photoUrl,
-        caption: caption || '',
-      }),
-    });
-  } catch (err) {
-    console.error('[sendPhotoToUser] error:', err);
-  }
+  });
 }
 
 export async function handleStatistics(ctx: Context): Promise<void> {
@@ -163,15 +99,12 @@ export async function handleStatistics(ctx: Context): Promise<void> {
 
   const uniqueCompleted = uniqueRunsByImports(completed);
 
-  // Отправляем текстовую сводку
+  // Текстовая сводка
   const lines = buildStatisticsLines(uniqueCompleted);
   await ctx.reply(lines.join('\n'));
 
-  // Отправляем график, если есть завершённые сверки
-  if (uniqueCompleted.length > 0) {
-    const chartUrl = generateChartUrl(uniqueCompleted);
-    await sendPhotoToUser(user.telegram_id!, chartUrl, 'График последних сверок');
-  }
+  // Кнопка WebApp вместо PNG‑графика
+  await sendWebAppButton(ctx, user.telegram_id!);
 
   // Фильтр по кабинетам, если есть
   const cabinets = await findCabinetsByUserId(user.id);
@@ -234,7 +167,6 @@ export async function handleStatisticsFilter(ctx: Context, cabinetId?: string): 
   const lines = buildStatisticsLines(uniqueFiltered, filterLabel);
   await ctx.reply(lines.join('\n'));
 
-  // График по отфильтрованным данным
-  const chartUrl = generateChartUrl(uniqueFiltered);
-  await sendPhotoToUser(user.telegram_id!, chartUrl, `График по кабинету: ${filterLabel}`);
+  // Кнопка WebApp (та же, без фильтрации в URL — пользователь сам выберет кабинет)
+  await sendWebAppButton(ctx, user.telegram_id!);
 }
