@@ -13,7 +13,7 @@ import {
 } from '@/src/db/repositories/parsing-errors';
 import { normalizeDate } from '@/src/lib/parsing/normalize/dates';
 import { normalizeAmount } from '@/src/lib/parsing/normalize/amounts';
-import { normalizeText } from '@/src/lib/parsing/normalize/text';
+import { normalizeText, normalizeDisplayText } from '@/src/lib/parsing/normalize/text';
 import { sha256 } from '@/src/lib/ingestion/hash';
 import { msg } from '@/src/lib/telegram/messages.ru';
 import { wbCompletedKeyboard, replaceWbInlineKeyboard } from '@/src/lib/telegram/keyboard';
@@ -148,7 +148,6 @@ export async function handleParseWb(job: Job): Promise<void> {
     return;
   }
 
-  // Поиск листа детализации по ключевому слову
   const sheetNames = workbook.SheetNames;
   let sheetName = sheetNames[0];
   for (const name of sheetNames) {
@@ -248,9 +247,9 @@ export async function handleParseWb(job: Job): Promise<void> {
       continue;
     }
 
-    const reference = colMap.referenceCol !== null ? normalizeText(row[colMap.referenceCol]) : null;
-    const description = colMap.descriptionCol !== null ? normalizeText(row[colMap.descriptionCol]) : null;
-    const counterparty = colMap.counterpartyCol !== null ? normalizeText(row[colMap.counterpartyCol]) : null;
+    const reference = colMap.referenceCol !== null ? normalizeDisplayText(row[colMap.referenceCol]) : null;
+    const description = colMap.descriptionCol !== null ? normalizeDisplayText(row[colMap.descriptionCol]) : null;
+    const counterparty = colMap.counterpartyCol !== null ? normalizeDisplayText(row[colMap.counterpartyCol]) : null;
     const rawPayload = JSON.parse(JSON.stringify(row).slice(0, 4000)) as unknown;
 
     for (const c of components) {
@@ -316,7 +315,6 @@ export async function handleParseWb(job: Job): Promise<void> {
       const sessionPayload = await import('@/src/lib/telegram/session').then(m => m.getSessionPayload(user.telegram_id!));
       const isReconciliationActive = sessionPayload && 'wb_import_id' in (sessionPayload ?? {});
 
-      // Проверка периода, если уже есть готовая выписка
       if (isReconciliationActive && periodStart && periodEnd && sessionPayload?.bank_import_id) {
         const bankImp = await findImportById(sessionPayload.bank_import_id as string);
         if (bankImp && bankImp.period_start && bankImp.period_end) {
