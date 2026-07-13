@@ -4,6 +4,7 @@ import type { Update, User as TgUser } from 'telegraf/types';
 import { requireTelegramSecret } from '@/src/lib/guards';
 import { okResponse, errResponse } from '@/src/lib/http';
 import { findUserByTelegramId, updateUser } from '@/src/db/repositories/users';
+import { handleStart } from '@/src/lib/telegram/handlers/start';
 import { drainQueue } from '@/src/lib/jobs/runner';
 import { runBackground } from '@/src/lib/jobs/background';
 
@@ -16,7 +17,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Guard проверка
   const guard = requireTelegramSecret(adaptToNextRequest(req) as any);
   if (guard) {
     return res.status(401).json({ error: 'Invalid telegram secret' });
@@ -49,18 +49,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    // ВРЕМЕННАЯ ЗАГЛУШКА: вместо routeUpdate просто отправляем "Бот работает"
-    const chatId = extractChatId(update);
-    const token = process.env.TELEGRAM_BOT_TOKEN;
-    if (chatId && token) {
-      try {
-        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: 'Бот работает в режиме диагностики' }),
-        });
-      } catch (err) {
-        console.error('[webhook] sendMessage failed:', err);
+    // Вместо routeUpdate пробуем вызвать handleStart напрямую для /start
+    if ('message' in update && update.message && 'text' in update.message) {
+      const text = update.message.text.trim();
+      if (text === '/start' || text.startsWith('/start ')) {
+        const ctx = buildStartCtx(update);
+        await handleStart(ctx as any, undefined);
+      } else {
+        // Заглушка для остальных команд
+        const chatId = extractChatId(update);
+        if (chatId && process.env.TELEGRAM_BOT_TOKEN) {
+          await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: chatId, text: 'Бот работает в режиме диагностики' }),
+          });
+        }
       }
     }
   } catch (err) {
@@ -102,5 +106,27 @@ function adaptToNextRequest(req: NextApiRequest): any {
     headers: {
       get: (name: string) => req.headers[name.toLowerCase()] as string | undefined,
     },
+  };
+}
+
+function buildStartCtx(update: Update): any {
+  const from = extractFrom(update);
+  const chatId = extractChatId(update);
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+
+  return {
+    from,
+    message: 'message' in update ? update.message : undefined,
+    reply: async (text: string, extra?: any) => {
+      if (!chatId || !token) return;
+      const body: any = { chat_id: chatId, text };
+      if (extra?.reply_markup) body.reply_markup = extra.reply_markup;
+      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    },
+    answerCbQuery: async () => {},
   };
 }
