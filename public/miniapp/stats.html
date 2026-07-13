@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Статистика SverkaBot</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 16px;
+      background: var(--tg-theme-bg-color, #fff);
+      color: var(--tg-theme-text-color, #000);
+    }
+    .error {
+      color: red;
+      padding: 16px;
+    }
+    canvas {
+      max-width: 100%;
+      margin-top: 16px;
+    }
+    select {
+      margin: 8px 0 16px;
+      padding: 8px;
+      width: 100%;
+      max-width: 300px;
+    }
+  </style>
+</head>
+<body>
+  <h2>📈 Статистика выплат</h2>
+  <div id="error" class="error" style="display:none;"></div>
+  <label for="cabinet">Кабинет WB:</label>
+  <select id="cabinet">
+    <option value="">Все кабинеты</option>
+  </select>
+  <canvas id="chart" width="400" height="300"></canvas>
+
+  <script>
+    const tg = window.Telegram.WebApp;
+    tg.ready();
+    tg.expand();
+
+    const cabinetSelect = document.getElementById('cabinet');
+    const errorDiv = document.getElementById('error');
+    let chart = null;
+
+    async function loadData(cabinetId = '') {
+      try {
+        const initData = tg.initData;
+        if (!initData) {
+          throw new Error('initData отсутствует (возможно, приложение открыто не из Telegram)');
+        }
+
+        const url = new URL('/api/miniapp/stats', window.location.origin);
+        if (cabinetId) url.searchParams.set('cabinet_id', cabinetId);
+
+        const res = await fetch(url.toString(), {
+          headers: { 'Authorization': `tma ${initData}` }
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || `HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        if (!data.ok) throw new Error('Invalid response');
+
+        // Обновляем список кабинетов
+        cabinetSelect.innerHTML = '<option value="">Все кабинеты</option>';
+        for (const c of data.cabinets) {
+          const opt = document.createElement('option');
+          opt.value = c.id;
+          opt.textContent = c.name;
+          cabinetSelect.appendChild(opt);
+        }
+        cabinetSelect.value = cabinetId;
+
+        // Рисуем график
+        renderChart(data.chart);
+        errorDiv.style.display = 'none';
+      } catch (err) {
+        errorDiv.textContent = 'Ошибка загрузки: ' + err.message;
+        errorDiv.style.display = 'block';
+      }
+    }
+
+    function renderChart(chartData) {
+      const ctx = document.getElementById('chart').getContext('2d');
+      if (chart) chart.destroy();
+
+      chart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: chartData.labels,
+          datasets: [
+            {
+              label: 'Ожидалось (₽)',
+              data: chartData.expected,
+              backgroundColor: 'rgba(54, 162, 235, 0.7)',
+            },
+            {
+              label: 'Поступило (₽)',
+              data: chartData.received,
+              backgroundColor: 'rgba(75, 192, 192, 0.7)',
+            },
+            {
+              label: 'Расхождение (₽)',
+              data: chartData.loss,
+              backgroundColor: 'rgba(255, 99, 132, 0.7)',
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            title: { display: true, text: 'Динамика выплат' },
+          },
+          scales: {
+            x: { stacked: false },
+            y: { stacked: false, beginAtZero: true },
+          },
+        },
+      });
+    }
+
+    cabinetSelect.addEventListener('change', () => {
+      loadData(cabinetSelect.value);
+    });
+
+    // Первая загрузка
+    loadData();
+  </script>
+</body>
+</html>
