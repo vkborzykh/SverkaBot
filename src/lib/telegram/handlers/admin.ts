@@ -21,6 +21,7 @@ export function isAdmin(telegramId: bigint): boolean {
 }
 
 export async function handleViewProfiles(ctx: Context): Promise<void> {
+  if (!isAdmin(BigInt(ctx.from!.id))) { await ctx.reply(msg.adminNotAuthorized); return; }
   const db = getDb();
   const profiles = await db
     .select()
@@ -48,6 +49,7 @@ export async function handleViewProfiles(ctx: Context): Promise<void> {
 }
 
 export async function handleActivateProfile(ctx: Context): Promise<void> {
+  if (!isAdmin(BigInt(ctx.from!.id))) { await ctx.reply(msg.adminNotAuthorized); return; }
   const text = (ctx.message && 'text' in ctx.message ? ctx.message.text : '') ?? '';
   const parts = text.trim().split(/\s+/);
   const profileId = parts[1];
@@ -74,6 +76,7 @@ export async function handleActivateProfile(ctx: Context): Promise<void> {
 }
 
 export async function handleDeprecateProfile(ctx: Context): Promise<void> {
+  if (!isAdmin(BigInt(ctx.from!.id))) { await ctx.reply(msg.adminNotAuthorized); return; }
   const text = (ctx.message && 'text' in ctx.message ? ctx.message.text : '') ?? '';
   const parts = text.trim().split(/\s+/);
   const profileId = parts[1];
@@ -100,6 +103,7 @@ export async function handleDeprecateProfile(ctx: Context): Promise<void> {
 }
 
 export async function handleViewErrors(ctx: Context): Promise<void> {
+  if (!isAdmin(BigInt(ctx.from!.id))) { await ctx.reply(msg.adminNotAuthorized); return; }
   const db = getDb();
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
@@ -129,6 +133,7 @@ export async function handleViewErrors(ctx: Context): Promise<void> {
 }
 
 export async function handleStats(ctx: Context): Promise<void> {
+  if (!isAdmin(BigInt(ctx.from!.id))) { await ctx.reply(msg.adminNotAuthorized); return; }
   const db = getDb();
 
   const result = await db.execute(sql`
@@ -169,6 +174,7 @@ export async function handleStats(ctx: Context): Promise<void> {
 }
 
 export async function handleRetryExport(ctx: Context): Promise<void> {
+  if (!isAdmin(BigInt(ctx.from!.id))) { await ctx.reply(msg.adminNotAuthorized); return; }
   const text = (ctx.message && 'text' in ctx.message ? ctx.message.text : '') ?? '';
   const parts = text.trim().split(/\s+/);
   const runId = parts[1];
