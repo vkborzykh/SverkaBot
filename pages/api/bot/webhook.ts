@@ -43,9 +43,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const from = extractFrom(update);
     const telegramId = from ? BigInt(from.id) : null;
 
-    // Атомарная дедупликация по update_id: обновляем last_update_id только если
-    // текущий update_id больше сохранённого. Если обновление не затронуло строк —
-    // значит это дубль, пропускаем обработку.
     if (telegramId) {
       const db = getDb();
       const result = await db
@@ -60,7 +57,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             )
           )
         );
-      if (result.rowCount === 0) {
+      if (result.length === 0) {
         return res.status(200).json({ ok: true });
       }
     }
