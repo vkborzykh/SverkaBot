@@ -184,6 +184,25 @@ function buildContext(update: Update): any {
   };
 }
 
+// Ожидаемые цены тарифов (должны совпадать с TARIFFS в subscribe.ts)
+const EXPECTED_PRICES: Record<string, { month: number; annual: number; monthWithReferral: number }> = {
+  START: {
+    month: 99_000,
+    annual: Math.round(99_000 * 12 * 0.8), // 950_400
+    monthWithReferral: Math.round(99_000 * 0.8), // 79_200
+  },
+  PRO: {
+    month: 199_000,
+    annual: Math.round(199_000 * 12 * 0.8), // 1_910_400
+    monthWithReferral: Math.round(199_000 * 0.8), // 159_200
+  },
+  BUSINESS: {
+    month: 499_000,
+    annual: Math.round(499_000 * 12 * 0.8), // 4_790_400
+    monthWithReferral: Math.round(499_000 * 0.8), // 399_200
+  },
+};
+
 async function routeTelegramUpdate(update: Update): Promise<void> {
   const ctx = buildContext(update);
   const from = ctx.from;
@@ -207,7 +226,6 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
       const EXPORT_ADDON_PRICE_KOPEKS = 59_000;
       if (sp.total_amount !== EXPORT_ADDON_PRICE_KOPEKS || sp.currency !== 'RUB') return;
       try {
-        // Идемпотентность: предотвращаем повторную обработку одной и той же транзакции
         const existing = await findBillingTransactionByProviderTxId(sp.telegram_payment_charge_id);
         if (existing) return;
 
@@ -245,6 +263,22 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
       }
 
       if (!tariffKey || !['START', 'PRO', 'BUSINESS'].includes(tariffKey) || sp.currency !== 'RUB') return;
+
+      // Сверяем сумму платежа с ожидаемой ценой
+      const prices = EXPECTED_PRICES[tariffKey];
+      const expectedAmount = days === 365 ? prices.annual : prices.month;
+      const expectedWithReferral = days === 30 ? prices.monthWithReferral : null;
+      const isValidAmount =
+        sp.total_amount === expectedAmount ||
+        (expectedWithReferral !== null && sp.total_amount === expectedWithReferral);
+      if (!isValidAmount) {
+        console.error(
+          `[successful_payment] amount mismatch: got ${sp.total_amount}, expected ${expectedAmount}` +
+          (expectedWithReferral !== null ? ` or ${expectedWithReferral} (referral)` : '') +
+          ` for tariff ${tariffKey}, period ${days}d`
+        );
+        return;
+      }
 
       const user = await findUserByTelegramId(telegramId);
       if (user) {
