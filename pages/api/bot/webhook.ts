@@ -406,7 +406,7 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
     if (command === 'start') {
       const user = await findUserByTelegramId(telegramId);
       const { handleStart } = await import('@/src/lib/telegram/handlers/start');
-      await handleStart(ctx, user?.tariff);
+      await handleStart(ctx);
       return;
     }
 
