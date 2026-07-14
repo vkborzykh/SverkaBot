@@ -54,7 +54,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    // Маршрутизация команд и колбэков
     await routeTelegramUpdate(update);
 
   } catch (err) {
@@ -64,8 +63,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   runBackground(drainQueue());
   return res.status(200).json({ ok: true });
 }
-
-// ---------- Вспомогательные функции ----------
 
 function extractFrom(update: Update): TgUser | undefined {
   if ('message' in update && update.message && 'from' in update.message) {
@@ -184,22 +181,21 @@ function buildContext(update: Update): any {
   };
 }
 
-// Ожидаемые цены тарифов (должны совпадать с TARIFFS в subscribe.ts)
 const EXPECTED_PRICES: Record<string, { month: number; annual: number; monthWithReferral: number }> = {
   START: {
     month: 99_000,
-    annual: Math.round(99_000 * 12 * 0.8), // 950_400
-    monthWithReferral: Math.round(99_000 * 0.8), // 79_200
+    annual: Math.round(99_000 * 12 * 0.8),
+    monthWithReferral: Math.round(99_000 * 0.8),
   },
   PRO: {
     month: 199_000,
-    annual: Math.round(199_000 * 12 * 0.8), // 1_910_400
-    monthWithReferral: Math.round(199_000 * 0.8), // 159_200
+    annual: Math.round(199_000 * 12 * 0.8),
+    monthWithReferral: Math.round(199_000 * 0.8),
   },
   BUSINESS: {
     month: 499_000,
-    annual: Math.round(499_000 * 12 * 0.8), // 4_790_400
-    monthWithReferral: Math.round(499_000 * 0.8), // 399_200
+    annual: Math.round(499_000 * 12 * 0.8),
+    monthWithReferral: Math.round(499_000 * 0.8),
   },
 };
 
@@ -212,6 +208,48 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
   // Pre‑checkout
   if ('pre_checkout_query' in update && update.pre_checkout_query) {
     const pq = update.pre_checkout_query;
+    const payload = pq.invoice_payload ?? '';
+    const telegramId = BigInt(pq.from.id);
+
+    // Проверка аддона: пользователь должен всё ещё быть на PRO
+    if (payload.startsWith('addon_export_')) {
+      const user = await findUserByTelegramId(telegramId);
+      if (!user || user.tariff !== 'PRO' || user.export_addon_active) {
+        await ctx.answerPreCheckoutQuery({
+          pre_checkout_query_id: pq.id,
+          ok: false,
+          error_message: 'Условия подключения аддона изменились. Пожалуйста, проверьте тариф.',
+        });
+        return;
+      }
+      await ctx.answerPreCheckoutQuery({ pre_checkout_query_id: pq.id, ok: true });
+      return;
+    }
+
+    // Проверка обычной подписки: сверяем сумму с ожидаемой
+    const isAnnual = payload.startsWith('annual_');
+    const parts = isAnnual ? payload.replace('annual_', '').split('_') : payload.split('_');
+    if (parts.length >= 3) {
+      const tariffKey = parts[2];
+      const days = isAnnual ? 365 : 30;
+      const prices = EXPECTED_PRICES[tariffKey];
+      if (prices) {
+        const expectedAmount = days === 365 ? prices.annual : prices.month;
+        const expectedWithReferral = days === 30 ? prices.monthWithReferral : null;
+        const isValidAmount =
+          pq.total_amount === expectedAmount ||
+          (expectedWithReferral !== null && pq.total_amount === expectedWithReferral);
+        if (!isValidAmount) {
+          await ctx.answerPreCheckoutQuery({
+            pre_checkout_query_id: pq.id,
+            ok: false,
+            error_message: 'Сумма платежа не соответствует выбранному тарифу.',
+          });
+          return;
+        }
+      }
+    }
+
     await ctx.answerPreCheckoutQuery({ pre_checkout_query_id: pq.id, ok: true });
     return;
   }
@@ -221,7 +259,6 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
     const sp = update.message.successful_payment;
     const telegramId = BigInt(update.message.chat.id);
 
-    // Обработка аддона
     if (sp.invoice_payload && sp.invoice_payload.startsWith('addon_export_')) {
       const EXPORT_ADDON_PRICE_KOPEKS = 59_000;
       if (sp.total_amount !== EXPORT_ADDON_PRICE_KOPEKS || sp.currency !== 'RUB') return;
@@ -249,7 +286,6 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
       return;
     }
 
-    // Обычная подписка (месяц/год)
     try {
       const payload = sp.invoice_payload ?? '';
       let tariffKey: any = null;
@@ -264,7 +300,6 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
 
       if (!tariffKey || !['START', 'PRO', 'BUSINESS'].includes(tariffKey) || sp.currency !== 'RUB') return;
 
-      // Сверяем сумму платежа с ожидаемой ценой
       const prices = EXPECTED_PRICES[tariffKey];
       const expectedAmount = days === 365 ? prices.annual : prices.month;
       const expectedWithReferral = days === 30 ? prices.monthWithReferral : null;
@@ -272,11 +307,7 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
         sp.total_amount === expectedAmount ||
         (expectedWithReferral !== null && sp.total_amount === expectedWithReferral);
       if (!isValidAmount) {
-        console.error(
-          `[successful_payment] amount mismatch: got ${sp.total_amount}, expected ${expectedAmount}` +
-          (expectedWithReferral !== null ? ` or ${expectedWithReferral} (referral)` : '') +
-          ` for tariff ${tariffKey}, period ${days}d`
-        );
+        console.error(`[successful_payment] amount mismatch: got ${sp.total_amount}, expected ${expectedAmount}`);
         return;
       }
 
@@ -334,7 +365,6 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
     return;
   }
 
-  // Сообщение с текстом
   if ('message' in update && update.message && 'text' in update.message && from) {
     const text = update.message.text.trim();
     const telegramId = BigInt(from.id);
@@ -364,7 +394,6 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
     }
     if (!command) return;
 
-    // /start
     if (command === 'start') {
       const user = await findUserByTelegramId(telegramId);
       const { handleStart } = await import('@/src/lib/telegram/handlers/start');
@@ -387,7 +416,6 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
       return;
     }
 
-    // Обработчики команд
     switch (command) {
       case 'subscribe': {
         const { handleSubscribe } = await import('@/src/lib/telegram/handlers/subscribe');
@@ -443,7 +471,6 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
     }
   }
 
-  // Файлы (документы)
   if ('message' in update && update.message && 'document' in update.message && from) {
     const doc = update.message.document;
     const telegramId = BigInt(from.id);
@@ -461,13 +488,11 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
     }
   }
 
-  // Колбэки
   if ('callback_query' in update && update.callback_query) {
     const cbq = update.callback_query;
     const data = 'data' in cbq ? cbq.data : undefined;
     if (!data) return;
 
-    // Сводный экспорт (добавлено)
     if (data.startsWith('summary_export:')) {
       const cabinetId = data.slice('summary_export:'.length);
       const { handleSummaryExport } = await import('@/src/lib/telegram/handlers/summaryExport');
@@ -475,7 +500,6 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
       return;
     }
 
-    // Выбор тарифа
     if (data.startsWith('tariff_choice:')) {
       const { handleTariffChoice } = await import('@/src/lib/telegram/handlers/subscribe');
       await handleTariffChoice(ctx, data.slice('tariff_choice:'.length));
@@ -496,14 +520,12 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
       return;
     }
 
-    // Клейм текст
     if (data.startsWith('claim_text:')) {
       const { handleClaimText } = await import('@/src/lib/telegram/handlers/claim');
       await handleClaimText(ctx, data.slice('claim_text:'.length));
       return;
     }
 
-    // Кабинеты
     if (data.startsWith('cabinet_del:')) {
       const { handleCabinetDelete } = await import('@/src/lib/telegram/handlers/myCabinets');
       await handleCabinetDelete(ctx, data.slice('cabinet_del:'.length));
@@ -530,7 +552,6 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
       return;
     }
 
-    // История и экспорт
     if (data.startsWith('history_report:')) {
       const { handleHistoryReport } = await import('@/src/lib/telegram/handlers/history');
       await handleHistoryReport(ctx, data.slice('history_report:'.length));
@@ -572,7 +593,6 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
       return;
     }
 
-    // Остальные кнопки
     switch (data) {
       case 'cabinet_add': {
         const { handleCabinetAdd } = await import('@/src/lib/telegram/handlers/myCabinets');
