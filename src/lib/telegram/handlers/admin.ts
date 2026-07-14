@@ -11,14 +11,7 @@ import { enqueue } from '@/src/lib/jobs/queue';
 import { reports } from '@/src/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { msg } from '../messages.ru';
-
-const ADMIN_IDS_RAW = process.env.TELEGRAM_ADMIN_IDS ?? '';
-
-export function isAdmin(telegramId: bigint): boolean {
-  if (!ADMIN_IDS_RAW) return false;
-  const ids = ADMIN_IDS_RAW.split(',').map((s) => s.trim());
-  return ids.includes(String(telegramId));
-}
+import { isAdmin } from '../access';
 
 export async function handleViewProfiles(ctx: Context): Promise<void> {
   if (!isAdmin(BigInt(ctx.from!.id))) { await ctx.reply(msg.adminNotAuthorized); return; }
