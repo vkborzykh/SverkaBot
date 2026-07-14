@@ -162,6 +162,10 @@ export async function handleHistoryHtml(ctx: BotContext, runId: string): Promise
 /** Скачать исходный WB-отчёт */
 export async function handleDownloadWb(ctx: BotContext, runId: string): Promise<void> {
   await ctx.answerCbQuery?.();
+  // Проверка владения сверкой (защита от IDOR – SEC-003)
+  const user = await checkRunOwnership(ctx, runId);
+  if (!user) return;
+
   const run = await findRunById(runId);
   if (!run) return;
   const imp = await findImportById(run.wb_import_id);
@@ -184,6 +188,10 @@ export async function handleDownloadWb(ctx: BotContext, runId: string): Promise<
 /** Скачать исходную банковскую выписку */
 export async function handleDownloadBank(ctx: BotContext, runId: string): Promise<void> {
   await ctx.answerCbQuery?.();
+  // Проверка владения сверкой (защита от IDOR – SEC-003)
+  const user = await checkRunOwnership(ctx, runId);
+  if (!user) return;
+
   const run = await findRunById(runId);
   if (!run) return;
   const imp = await findImportById(run.bank_import_id);
