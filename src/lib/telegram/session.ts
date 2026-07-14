@@ -1,10 +1,11 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq, sql, and } from 'drizzle-orm';
 import { getDb } from '@/src/db/index';
 import { telegramSessions } from '@/src/db/schema';
 
 export type SessionState =
   | 'awaiting_wb_file'
   | 'awaiting_bank_file'
+  | 'awaiting_cabinet_name'
   | 'reconciliation_active';   // новая операция сверки
 
 const SESSION_TTL_MINUTES = 30;
@@ -19,8 +20,10 @@ export async function getSession(telegramId: bigint): Promise<SessionState | nul
     .select({ state: telegramSessions.state })
     .from(telegramSessions)
     .where(
-      eq(telegramSessions.telegram_id, telegramId),
-      sql`${telegramSessions.expires_at} > now()`,
+      and(
+        eq(telegramSessions.telegram_id, telegramId),
+        sql`${telegramSessions.expires_at} > now()`,
+      ),
     )
     .limit(1);
   return rows.length > 0 ? (rows[0].state as SessionState) : null;
@@ -34,8 +37,10 @@ export async function getSessionPayload(
     .select({ payload: telegramSessions.payload })
     .from(telegramSessions)
     .where(
-      eq(telegramSessions.telegram_id, telegramId),
-      sql`${telegramSessions.expires_at} > now()`,
+      and(
+        eq(telegramSessions.telegram_id, telegramId),
+        sql`${telegramSessions.expires_at} > now()`,
+      ),
     )
     .limit(1);
   return rows.length > 0 ? (rows[0].payload as Record<string, unknown>) : null;
