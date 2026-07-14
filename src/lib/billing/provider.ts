@@ -23,25 +23,6 @@ function getBaseUrl(): string {
   );
 }
 
-export class MockPaymentProvider implements PaymentProvider {
-  async createPayment(
-    amountKopeks: number,
-    currency: string,
-    metadata: { userId: string; description?: string },
-  ): Promise<PaymentResult> {
-    const providerTxId = `mock_${Date.now()}_${randomUUID().slice(0, 8)}`;
-    const base = getBaseUrl().startsWith('http')
-      ? getBaseUrl()
-      : `https://${getBaseUrl()}`;
-    const paymentUrl = `${base}/api/billing/mock-payment?txId=${providerTxId}&userId=${metadata.userId}`;
-    return { paymentUrl, providerTxId };
-  }
-
-  verifyWebhook(_payload: unknown, _signature: string): boolean {
-    return true;
-  }
-}
-
 export class YooKassaProvider implements PaymentProvider {
   private shopId = process.env.YOOKASSA_SHOP_ID ?? '';
   private secretKey = process.env.YOOKASSA_SECRET_KEY ?? '';
@@ -98,8 +79,12 @@ export class YooKassaProvider implements PaymentProvider {
   }
 }
 
-export function getPaymentProvider(): PaymentProvider {
-  if ((process.env.PAYMENT_PROVIDER ?? 'mock') === 'yookassa')
+/** Возвращает платёжный провайдер. Без явной настройки PAYMENT_PROVIDER=yookassa
+ *  не возвращает ничего — вызывающий код должен обработать этот случай.
+ */
+export function getPaymentProvider(): PaymentProvider | null {
+  if (process.env.PAYMENT_PROVIDER === 'yookassa') {
     return new YooKassaProvider();
-  return new MockPaymentProvider();
+  }
+  return null;
 }
