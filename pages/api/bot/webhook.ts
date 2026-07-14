@@ -207,6 +207,10 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
       const EXPORT_ADDON_PRICE_KOPEKS = 59_000;
       if (sp.total_amount !== EXPORT_ADDON_PRICE_KOPEKS || sp.currency !== 'RUB') return;
       try {
+        // Идемпотентность: предотвращаем повторную обработку одной и той же транзакции
+        const existing = await findBillingTransactionByProviderTxId(sp.telegram_payment_charge_id);
+        if (existing) return;
+
         const user = await findUserByTelegramId(telegramId);
         if (user && user.tariff === 'PRO') {
           await updateUser(user.id, { export_addon_active: true });
