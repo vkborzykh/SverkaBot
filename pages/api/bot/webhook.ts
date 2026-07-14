@@ -12,6 +12,9 @@ import { getMainMenuKeyboard } from '@/src/lib/telegram/keyboard';
 import { checkAccess, PROTECTED_COMMANDS } from '@/src/lib/telegram/access';
 import { TARIFF_BY_AMOUNT_KOPEKS } from '@/src/lib/billing/tariffs';
 import { createBillingTransaction, findBillingTransactionByProviderTxId } from '@/src/db/repositories/billing-transactions';
+import { getDb } from '@/src/db';
+import { users } from '@/src/db/schema';
+import { eq, sql, and, or, isNull, lt } from 'drizzle-orm';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === 'GET') {
@@ -38,22 +41,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const updateId = (update as { update_id: number }).update_id;
     const from = extractFrom(update);
-    if (from) {
-      try {
-        const telegramId = BigInt(from.id);
-        const user = await findUserByTelegramId(telegramId);
-        if (user) {
-          const lastId = user.last_update_id;
-          if (lastId !== null && lastId !== undefined && BigInt(updateId) <= lastId) {
-            return res.status(200).json({ ok: true });
-          }
-          await updateUser(user.id, { last_update_id: BigInt(updateId) });
-        }
-      } catch (err) {
-        console.error('[webhook] dedup/DB step failed (continuing):', err);
+    const telegramId = from ? BigInt(from.id) : null;
+
+    // Атомарная дедупликация по update_id: обновляем last_update_id только если
+    // текущий update_id больше сохранённого. Если обновление не затронуло строк —
+    // значит это дубль, пропускаем обработку.
+    if (telegramId) {
+      const db = getDb();
+      const result = await db
+        .update(users)
+        .set({ last_update_id: BigInt(updateId) })
+        .where(
+          and(
+            eq(users.telegram_id, telegramId),
+            or(
+              isNull(users.last_update_id),
+              lt(users.last_update_id, BigInt(updateId))
+            )
+          )
+        );
+      if (result.rowCount === 0) {
+        return res.status(200).json({ ok: true });
       }
     }
 
+    // Маршрутизация команд и колбэков
     await routeTelegramUpdate(update);
 
   } catch (err) {
@@ -63,6 +75,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   runBackground(drainQueue());
   return res.status(200).json({ ok: true });
 }
+
+// ---------- Вспомогательные функции ----------
 
 function extractFrom(update: Update): TgUser | undefined {
   if ('message' in update && update.message && 'from' in update.message) {
@@ -211,7 +225,6 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
     const payload = pq.invoice_payload ?? '';
     const telegramId = BigInt(pq.from.id);
 
-    // Проверка аддона: пользователь должен всё ещё быть на PRO
     if (payload.startsWith('addon_export_')) {
       const user = await findUserByTelegramId(telegramId);
       if (!user || user.tariff !== 'PRO' || user.export_addon_active) {
@@ -226,7 +239,6 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
       return;
     }
 
-    // Проверка обычной подписки: сверяем сумму с ожидаемой
     const isAnnual = payload.startsWith('annual_');
     const parts = isAnnual ? payload.replace('annual_', '').split('_') : payload.split('_');
     if (parts.length >= 3) {
