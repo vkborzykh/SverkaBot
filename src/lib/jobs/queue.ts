@@ -8,7 +8,8 @@ export type JobType =
   | 'report_export'
   | 'subscription_reminder'
   | 'inactivity_reminder'
-  | 'file_cleanup';
+  | 'file_cleanup'
+  | 'weekly_digest';
 
 export async function enqueue(
   jobType: JobType,
