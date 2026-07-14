@@ -6,6 +6,9 @@ import { imports } from '../schema';
 export type Import = InferSelectModel<typeof imports>;
 export type NewImport = InferInsertModel<typeof imports>;
 
+// Тип статуса импорта из схемы
+export type ImportStatus = Import['status'];
+
 export async function findImportById(id: string): Promise<Import | undefined> {
   const db = getDb();
   const rows = await db
@@ -18,7 +21,7 @@ export async function findImportById(id: string): Promise<Import | undefined> {
 
 export async function findImportsByUserId(
   userId: string,
-  opts?: { sourceType?: 'WB' | 'BANK'; status?: string; limit?: number },
+  opts?: { sourceType?: 'WB' | 'BANK'; status?: ImportStatus; limit?: number },
 ): Promise<Import[]> {
   const db = getDb();
   const conditions = [eq(imports.user_id, userId), isNull(imports.deleted_at)];
