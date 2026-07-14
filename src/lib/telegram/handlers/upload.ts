@@ -1,4 +1,4 @@
-import { checkAccess } from '@/src/lib/telegram/access';
+import { checkAccess, isAdmin } from '@/src/lib/telegram/access';
 import { validateFileSize, validateExtension, MAX_FILE_BYTES } from '@/src/lib/ingestion/validate';
 import { sha256 } from '@/src/lib/ingestion/hash';
 import { storeFile } from '@/src/lib/ingestion/storage';
@@ -7,7 +7,6 @@ import { findUserByTelegramId } from '@/src/db/repositories/users';
 import { enqueue } from '@/src/lib/jobs/queue';
 import { msg } from '@/src/lib/telegram/messages.ru';
 import { setSession, getSessionPayload } from '@/src/lib/telegram/session';
-import { isAdmin } from '@/src/lib/telegram/handlers/admin';
 import { validateFileContent } from '@/src/lib/ingestion/validateContent';
 import type { BotContext } from '@/src/lib/telegram/router';
 
