@@ -29,7 +29,6 @@ function checkLimitAndReply(user: any, ctx: Context): boolean {
   const used = user.monthly_reconciliations ?? 0;
   if (used >= limit) {
     const message = user.subscription_status === 'TRIAL' ? msg.trialLimitReached(limit) : msg.startLimitReached(limit);
-    // Для TRIAL и START ведём на subscribe_inline, чтобы пользователь мог выбрать любой тариф
     ctx.reply(message, {
       reply_markup: {
         inline_keyboard: [[{ text: msg.upgradeToProButton, callback_data: 'subscribe_inline' }]],
@@ -82,6 +81,7 @@ export async function handleNewReconciliation(ctx: Context, userId: string): Pro
 }
 
 export async function handleCabinetPick(ctx: Context, cabinetId: string): Promise<void> {
+  await ctx.answerCbQuery?.();
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user || checkAccess(user) !== 'full') {
     await paywallReply(ctx, msg.accessExpired);
@@ -91,11 +91,9 @@ export async function handleCabinetPick(ctx: Context, cabinetId: string): Promis
 
   const cabinet = await findCabinetById(cabinetId);
   if (!cabinet || cabinet.user_id !== user.id) {
-    await ctx.answerCbQuery?.();
     await ctx.reply(msg.cabinetNotFound);
     return;
   }
-  await ctx.answerCbQuery?.();
   await updateUser(user.id, { current_cabinet_id: cabinetId });
   await setSession(BigInt(ctx.from!.id), 'reconciliation_active', { cabinet_id: cabinet.id });
   await ctx.reply(msg.cabinetSelected(cabinet.name));
@@ -103,6 +101,7 @@ export async function handleCabinetPick(ctx: Context, cabinetId: string): Promis
 }
 
 export async function handleUploadWbInline(ctx: Context): Promise<void> {
+  await ctx.answerCbQuery();
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user || checkAccess(user) !== 'full') {
     await paywallReply(ctx, msg.accessExpired);
@@ -110,7 +109,6 @@ export async function handleUploadWbInline(ctx: Context): Promise<void> {
   }
   if (checkLimitAndReply(user, ctx)) return;
 
-  await ctx.answerCbQuery();
   const telegramId = BigInt(ctx.from!.id);
   const payload = await getSessionPayload(telegramId) ?? {};
   await setSession(telegramId, 'awaiting_wb_file', payload);
@@ -118,6 +116,7 @@ export async function handleUploadWbInline(ctx: Context): Promise<void> {
 }
 
 export async function handleReplaceWb(ctx: Context): Promise<void> {
+  await ctx.answerCbQuery();
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user || checkAccess(user) !== 'full') {
     await paywallReply(ctx, msg.accessExpired);
@@ -125,7 +124,6 @@ export async function handleReplaceWb(ctx: Context): Promise<void> {
   }
   if (checkLimitAndReply(user, ctx)) return;
 
-  await ctx.answerCbQuery();
   const telegramId = BigInt(ctx.from!.id);
   const payload = await getSessionPayload(telegramId) ?? {};
   delete payload.wb_import_id;
@@ -134,6 +132,7 @@ export async function handleReplaceWb(ctx: Context): Promise<void> {
 }
 
 export async function handleUploadBankInline(ctx: Context): Promise<void> {
+  await ctx.answerCbQuery();
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user || checkAccess(user) !== 'full') {
     await paywallReply(ctx, msg.accessExpired);
@@ -141,7 +140,6 @@ export async function handleUploadBankInline(ctx: Context): Promise<void> {
   }
   if (checkLimitAndReply(user, ctx)) return;
 
-  await ctx.answerCbQuery();
   const telegramId = BigInt(ctx.from!.id);
   const payload = await getSessionPayload(telegramId) ?? {};
   await setSession(telegramId, 'awaiting_bank_file', payload);
@@ -149,6 +147,7 @@ export async function handleUploadBankInline(ctx: Context): Promise<void> {
 }
 
 export async function handleReplaceBank(ctx: Context): Promise<void> {
+  await ctx.answerCbQuery();
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user || checkAccess(user) !== 'full') {
     await paywallReply(ctx, msg.accessExpired);
@@ -156,7 +155,6 @@ export async function handleReplaceBank(ctx: Context): Promise<void> {
   }
   if (checkLimitAndReply(user, ctx)) return;
 
-  await ctx.answerCbQuery();
   const telegramId = BigInt(ctx.from!.id);
   const payload = await getSessionPayload(telegramId) ?? {};
   delete payload.bank_import_id;
@@ -165,6 +163,7 @@ export async function handleReplaceBank(ctx: Context): Promise<void> {
 }
 
 export async function handleRunSyncInline(ctx: Context): Promise<void> {
+  await ctx.answerCbQuery();
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user || checkAccess(user) !== 'full') {
     await paywallReply(ctx, msg.accessExpired);
@@ -173,7 +172,6 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
 
   const used = user.monthly_reconciliations ?? 0;
 
-  // Проверка лимита для TRIAL
   if (user.subscription_status === 'TRIAL') {
     if (used >= TRIAL_LIMIT) {
       await ctx.reply(msg.trialLimitReached(TRIAL_LIMIT), {
@@ -185,7 +183,6 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
     }
   }
 
-  // Лимит для платных тарифов (только START, т.к. PRO и BUSINESS безлимитны)
   if (user.subscription_status === 'ACTIVE') {
     const limit = monthlyLimitFor(user.tariff);
     if (limit !== null && used >= limit) {
@@ -198,7 +195,6 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
     }
   }
 
-  await ctx.answerCbQuery();
   const telegramId = BigInt(ctx.from!.id);
   const payload = await getSessionPayload(telegramId) ?? {};
   const wbImportId = payload.wb_import_id as string | undefined;
@@ -219,8 +215,6 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
     }
     await enqueue('reconcile', result.run_id, { run_id: result.run_id });
 
-    // Проверяем, не была ли уже выполнена успешная сверка с теми же файлами в текущем месяце.
-    // Если была – повторный прогон не расходует квоту.
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
@@ -242,7 +236,6 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
       .limit(1);
 
     if (existingCompleted.length === 0) {
-      // Увеличиваем счётчик только если это действительно новая пара файлов
       await updateUser(user.id, { monthly_reconciliations: used + 1 });
     }
 
