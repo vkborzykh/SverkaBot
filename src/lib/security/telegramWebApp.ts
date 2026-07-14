@@ -26,7 +26,18 @@ export function verifyTelegramInitData(
   const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
   const computedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
 
-  if (!crypto.timingSafeEqual(Buffer.from(computedHash), Buffer.from(hash))) {
+  // timingSafeEqual бросает исключение при несовпадении длины буферов.
+  // Проверяем длину до сравнения и оборачиваем в try/catch.
+  const computedBuffer = Buffer.from(computedHash);
+  const hashBuffer = Buffer.from(hash);
+  if (computedBuffer.length !== hashBuffer.length) {
+    return { ok: false, reason: 'bad_signature' };
+  }
+  try {
+    if (!crypto.timingSafeEqual(computedBuffer, hashBuffer)) {
+      return { ok: false, reason: 'bad_signature' };
+    }
+  } catch {
     return { ok: false, reason: 'bad_signature' };
   }
 
