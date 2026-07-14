@@ -413,10 +413,18 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
     const user = await findUserByTelegramId(telegramId);
     if (!user) {
       const { handleStart } = await import('@/src/lib/telegram/handlers/start');
+      await handleStart(ctx);
       return;
     }
 
-    const access = checkAccess(user);
+    // Явно извлекаем поля для checkAccess, чтобы избежать конфликта типов
+    const access = checkAccess({
+      subscription_status: user.subscription_status,
+      trial_expires_at: user.trial_expires_at,
+      subscription_end_date: user.subscription_end_date,
+      telegram_id: user.telegram_id,
+    });
+
     if (access !== 'full' && PROTECTED_COMMANDS.has(command)) {
       await ctx.reply(msg.accessExpired, {
         reply_markup: { inline_keyboard: [[{ text: '💰 Подписка', callback_data: 'subscribe_inline' }]] }
