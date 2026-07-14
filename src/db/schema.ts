@@ -30,8 +30,7 @@ import {
   jobStatusEnum,
 } from './enums';
 
-// ── wb_cabinets ──────────────────────────────────────────────────────────────
-// Определена ДО users, потому что users.current_cabinet_id ссылается на неё.
+// ── wb_cabinets (определена ДО users, чтобы разорвать циклическую ссылку) ──
 
 export const wb_cabinets = pgTable(
   'wb_cabinets',
@@ -58,7 +57,7 @@ export const wb_cabinets = pgTable(
   ],
 );
 
-// ── users ────────────────────────────────────────────────────────────────────
+// ── users (ссылается на wb_cabinets, которая уже определена выше) ──
 
 export const users = pgTable(
   'users',
