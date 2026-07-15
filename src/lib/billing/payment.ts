@@ -13,6 +13,10 @@ export async function createOrReusePayment(userId: string): Promise<string> {
   if (pending?.confirmation_url) return pending.confirmation_url;
 
   const provider = getPaymentProvider();
+  if (!provider) {
+    throw new Error('Payment provider is not configured (PAYMENT_PROVIDER env var missing)');
+  }
+
   const { paymentUrl, providerTxId } = await provider.createPayment(
     SUBSCRIPTION_AMOUNT_KOPEKS,
     CURRENCY,
