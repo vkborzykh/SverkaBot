@@ -48,6 +48,7 @@ export const users = pgTable(
     invited_by: bigint('invited_by', { mode: 'bigint' }),
     tariff: text('tariff').default('START'),
     monthly_reconciliations: integer('monthly_reconciliations').default(0),
+    // Убираем внешний ключ, чтобы разорвать циклическую зависимость с wb_cabinets
     current_cabinet_id: uuid('current_cabinet_id'),
     last_update_id: bigint('last_update_id', { mode: 'bigint' }),
     export_addon_active: boolean('export_addon_active').notNull().default(false),
