@@ -30,34 +30,7 @@ import {
   jobStatusEnum,
 } from './enums';
 
-// ── wb_cabinets (определена ДО users, чтобы разорвать циклическую ссылку) ──
-
-export const wb_cabinets = pgTable(
-  'wb_cabinets',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    user_id: uuid('user_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'restrict' }),
-    name: text('name').notNull(),
-    created_at: timestamp('created_at', { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-    updated_at: timestamp('updated_at', { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-    deleted_at: timestamp('deleted_at', { withTimezone: true }),
-  },
-  (t) => [
-    index('wb_cabinets_user_id_idx').on(t.user_id),
-    uniqueIndex('wb_cabinets_user_name_unique_idx')
-      .on(t.user_id, t.name)
-      .where(sql`${t.deleted_at} IS NULL`),
-    check('wb_cabinets_name_length_check', sql`char_length(name) BETWEEN 1 AND 64`),
-  ],
-);
-
-// ── users (ссылается на wb_cabinets, которая уже определена выше) ──
+// ── users ────────────────────────────────────────────────────────────────────
 
 export const users = pgTable(
   'users',
@@ -75,7 +48,7 @@ export const users = pgTable(
     invited_by: bigint('invited_by', { mode: 'bigint' }),
     tariff: text('tariff').default('START'),
     monthly_reconciliations: integer('monthly_reconciliations').default(0),
-    current_cabinet_id: uuid('current_cabinet_id').references(() => wb_cabinets.id, { onDelete: 'set null' }),
+    current_cabinet_id: uuid('current_cabinet_id'),
     last_update_id: bigint('last_update_id', { mode: 'bigint' }),
     export_addon_active: boolean('export_addon_active').notNull().default(false),
     created_at: timestamp('created_at', { withTimezone: true })
@@ -138,6 +111,33 @@ export const admin_notifications = pgTable(
     created_at: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [index('admin_notifications_resolved_idx').on(t.resolved)],
+);
+
+// ── wb_cabinets ──────────────────────────────────────────────────────────────
+
+export const wb_cabinets = pgTable(
+  'wb_cabinets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    user_id: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    name: text('name').notNull(),
+    created_at: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updated_at: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    deleted_at: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('wb_cabinets_user_id_idx').on(t.user_id),
+    uniqueIndex('wb_cabinets_user_name_unique_idx')
+      .on(t.user_id, t.name)
+      .where(sql`${t.deleted_at} IS NULL`),
+    check('wb_cabinets_name_length_check', sql`char_length(name) BETWEEN 1 AND 64`),
+  ],
 );
 
 // ── statement_profiles ────────────────────────────────────────────────────────
