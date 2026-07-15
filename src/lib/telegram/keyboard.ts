@@ -25,10 +25,15 @@ export const deleteConfirmKeyboard = {
  * Возвращает клавиатуру главного меню в зависимости от тарифа пользователя.
  * Кнопка «Мои кабинеты» видна только на PRO и BUSINESS.
  * Кнопка «📈 Статистика» – только на PRO/BUSINESS.
+ * Во время активного пробного периода TRIAL все кнопки видимы.
  */
-export function getMainMenuKeyboard(userTariff?: string | null) {
+export function getMainMenuKeyboard(
+  userTariff?: string | null,
+  subscriptionStatus?: string | null,
+  trialExpiresAt?: Date | null,
+) {
   const secondRow = [msg.menuSubscribe];
-  if (hasProFeatures(userTariff)) {
+  if (hasProFeatures(userTariff, subscriptionStatus, trialExpiresAt)) {
     secondRow.push(msg.menuMyCabinets);
   }
 
@@ -38,7 +43,7 @@ export function getMainMenuKeyboard(userTariff?: string | null) {
     [msg.menuHelp, msg.menuHistory],
   ];
 
-  if (hasProFeatures(userTariff)) {
+  if (hasProFeatures(userTariff, subscriptionStatus, trialExpiresAt)) {
     keyboard.push([msg.menuStatistics]);
   }
 
