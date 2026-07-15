@@ -1,7 +1,13 @@
 import { findUserByTelegramId } from '@/src/db/repositories/users';
 import { findRunById } from '@/src/db/repositories/reconciliation-runs';
 import { msg } from '@/src/lib/telegram/messages.ru';
-import type { BotContext } from '@/src/lib/telegram/router';
+
+// Локальный тип вместо удалённого router.ts
+export interface BotContext {
+  from: { id: number; username?: string } | undefined;
+  reply(text: string, extra?: unknown): Promise<unknown>;
+  message?: { text?: string };
+}
 
 function formatAmount(kopeks: bigint | string | null | undefined): string {
   if (kopeks === null || kopeks === undefined) return '0,00';
