@@ -80,6 +80,15 @@ async function getStreak(userId: string): Promise<number> {
   return streak;
 }
 
+/** Склоняет слово «сверка» в зависимости от числа */
+function pluralizeSverka(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${count} сверка`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return `${count} сверки`;
+  return `${count} сверок`;
+}
+
 /** Проверяет, не является ли текущее расхождение аномально большим по сравнению со средним за последние 3 месяца. */
 async function checkAnomaly(userId: string, currentLoss: bigint): Promise<string | null> {
   if (currentLoss <= BigInt(0)) return null;
@@ -158,14 +167,13 @@ export async function handleReconcile(job: Job): Promise<void> {
         );
 
         const streak = await getStreak(user.id);
-        if (streak > 0 && result.status === 'reconciled') {
+        if (streak > 1 && result.status === 'reconciled') {
           await notifyUser(
             user.telegram_id,
-            `✅ Уже ${streak} ${streak === 1 ? 'сверка' : 'сверки'} подряд без невыясненных сумм!`,
+            `✅ Уже ${pluralizeSverka(streak)} подряд без невыясненных сумм!`,
           );
         }
 
-        // Проверка аномалии
         const anomalyMsg = await checkAnomaly(user.id, lossKopeks);
         if (anomalyMsg) {
           await notifyUser(user.telegram_id, anomalyMsg);
