@@ -11,14 +11,17 @@ export async function GET(
   if (guard) return guard;
 
   const { run_id } = params;
-  const userId = req.nextUrl.searchParams.get('user_id') ?? undefined;
+  const userId = req.nextUrl.searchParams.get('user_id');
+  if (!userId) {
+    return errResponse('MISSING_USER_ID', 'user_id обязателен', 400);
+  }
 
   const run = await findRunById(run_id);
   if (!run) {
     return errResponse('NOT_FOUND', 'Reconciliation run not found', 404);
   }
 
-  if (userId && run.user_id !== userId) {
+  if (run.user_id !== userId) {
     return errResponse('FORBIDDEN', 'Run does not belong to this user', 403);
   }
 
