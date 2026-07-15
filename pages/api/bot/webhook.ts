@@ -16,6 +16,25 @@ import { getDb } from '@/src/db';
 import { users } from '@/src/db/schema';
 import { eq, sql, and, or, isNull, lt } from 'drizzle-orm';
 
+// Простейший rate limiting для этапа A (только логирование)
+const rateLimitMap = new Map<string, number[]>();
+const RATE_LIMIT_WINDOW_MS = 10_000; // 10 секунд
+const RATE_LIMIT_MAX = 20; // 20 запросов за окно
+
+function checkRateLimit(telegramId: bigint): boolean {
+  const key = String(telegramId);
+  const now = Date.now();
+  const timestamps = rateLimitMap.get(key) || [];
+  const recent = timestamps.filter(ts => now - ts < RATE_LIMIT_WINDOW_MS);
+  recent.push(now);
+  rateLimitMap.set(key, recent);
+  if (recent.length > RATE_LIMIT_MAX) {
+    console.warn('[rate-limit] would block', { telegram_id: key, count: recent.length });
+    return true; // превышен, но на этом этапе только логируем
+  }
+  return false;
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === 'GET') {
     return res.status(200).json({ ok: true, hint: 'telegram webhook endpoint (POST only)' });
@@ -44,6 +63,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const telegramId = from ? BigInt(from.id) : null;
 
     if (telegramId) {
+      // Rate limiting shadow mode (только логирование)
+      checkRateLimit(telegramId);
+
       const db = getDb();
       const result = await db
         .update(users)
