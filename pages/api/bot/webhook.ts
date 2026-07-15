@@ -57,7 +57,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             )
           )
         );
-      if (result.length === 0) {
+      if (result.count === 0) {
         return res.status(200).json({ ok: true });
       }
     }
