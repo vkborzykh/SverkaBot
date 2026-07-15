@@ -1,11 +1,16 @@
-// src/lib/telegram/handlers/summaryExport.ts
 import type { Context } from 'telegraf';
 import { findUserByTelegramId } from '@/src/db/repositories/users';
 import { findRunsByUserId } from '@/src/db/repositories/reconciliation-runs';
 import { findImportById } from '@/src/db/repositories/imports';
 import { buildCombinedCsv, buildCombinedXlsx, buildCombined1c } from '@/src/lib/reports/combinedExport';
 import { hasBusinessFeatures } from '@/src/lib/billing/tariffs';
-import type { BotContext } from '../router';
+
+// Локальный тип вместо удалённого router.ts
+export interface BotContext {
+  from: { id: number; username?: string } | undefined;
+  reply(text: string, extra?: unknown): Promise<unknown>;
+  answerCbQuery?: (text?: string) => Promise<unknown>;
+}
 
 async function sendDocument(telegramId: bigint, buffer: Buffer, filename: string, contentType: string, caption?: string): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
