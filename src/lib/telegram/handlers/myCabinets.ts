@@ -46,7 +46,8 @@ export async function handleMyCabinets(ctx: Context): Promise<void> {
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user) return;
 
-  if (!hasProFeatures(user.tariff)) {
+  // Передаём статус подписки и дату окончания триала, чтобы TRIAL давал доступ
+  if (!hasProFeatures(user.tariff, user.subscription_status, user.trial_expires_at)) {
     await ctx.reply('Мультикабинет доступен на тарифах «Профи» и «Бизнес».', {
       reply_markup: {
         inline_keyboard: [[{ text: '⚡ Перейти на Профи', callback_data: 'tariff_pro' }]],
@@ -56,10 +57,10 @@ export async function handleMyCabinets(ctx: Context): Promise<void> {
   }
 
   const cabinets = await findCabinetsByUserId(user.id);
-  const limit = cabinetLimitFor(user.tariff);
+  const limit = cabinetLimitFor(user.tariff, user.subscription_status, user.trial_expires_at);
   const canAdd = cabinets.length < limit;
-  const showUpgrade = !canAdd && !hasBusinessFeatures(user.tariff);
-  const isBusiness = hasBusinessFeatures(user.tariff);
+  const showUpgrade = !canAdd && !hasBusinessFeatures(user.tariff, user.subscription_status, user.trial_expires_at);
+  const isBusiness = hasBusinessFeatures(user.tariff, user.subscription_status, user.trial_expires_at);
   const header =
     cabinets.length > 0
       ? msg.myCabinetsHeader(cabinets.length, limit)
@@ -85,9 +86,12 @@ export async function handleCabinetAdd(ctx: Context): Promise<void> {
   await ctx.answerCbQuery?.();
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user) return;
-  const [count, limit] = [await countCabinetsByUserId(user.id), cabinetLimitFor(user.tariff)];
+  const [count, limit] = [
+    await countCabinetsByUserId(user.id),
+    cabinetLimitFor(user.tariff, user.subscription_status, user.trial_expires_at)
+  ];
   if (count >= limit) {
-    if (hasBusinessFeatures(user.tariff)) {
+    if (hasBusinessFeatures(user.tariff, user.subscription_status, user.trial_expires_at)) {
       await ctx.reply(msg.cabinetLimitBusiness(limit));
     } else {
       await ctx.reply(msg.cabinetLimitUpgrade, {
@@ -110,10 +114,17 @@ export async function handleCabinetNameReceived(ctx: Context, rawName: string): 
     await ctx.reply(msg.cabinetNameInvalid);
     return;
   }
-  const [count, limit] = [await countCabinetsByUserId(user.id), cabinetLimitFor(user.tariff)];
+  const [count, limit] = [
+    await countCabinetsByUserId(user.id),
+    cabinetLimitFor(user.tariff, user.subscription_status, user.trial_expires_at)
+  ];
   if (count >= limit) {
     await clearSession(BigInt(ctx.from!.id));
-    await ctx.reply(hasBusinessFeatures(user.tariff) ? msg.cabinetLimitBusiness(limit) : msg.cabinetLimitUpgrade);
+    await ctx.reply(
+      hasBusinessFeatures(user.tariff, user.subscription_status, user.trial_expires_at)
+        ? msg.cabinetLimitBusiness(limit)
+        : msg.cabinetLimitUpgrade
+    );
     return;
   }
   try {
