@@ -43,7 +43,7 @@ export async function handleClaimText(ctx: any, runId: string): Promise<void> {
     : 'неизвестную дату';
 
   const claim = [
-    '📝 Шаблон претензии в Wildberries',
+    'Шаблон претензии в Wildberries',
     '',
     `Дата сверки: ${period}`,
     `Ожидаемая выплата: ${rub(run.turnover_kopeks ?? BigInt(0))}`,
