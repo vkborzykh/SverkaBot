@@ -250,6 +250,7 @@ export const msg = {
   cabinetLimitUpgrade:
     'На вашем тарифе доступно 2 кабинета. До 5 кабинетов — на тарифе «Бизнес».',
   cabinetChoosePrompt: 'К какому кабинету относится эта сверка?',
+  cabinetMustBeSelected: 'Чтобы загрузить файл, сначала выберите, к какому кабинету относится сверка.',
   cabinetChosen: (name: string): string => `Кабинет: «${name}».`,
   cabinetSelected: (name: string): string => `Выбран кабинет «${name}».`,
 
