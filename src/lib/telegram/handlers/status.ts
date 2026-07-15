@@ -1,7 +1,13 @@
 import { findUserByTelegramId } from '@/src/db/repositories/users';
 import { findImportById } from '@/src/db/repositories/imports';
 import { msg } from '@/src/lib/telegram/messages.ru';
-import type { BotContext } from '@/src/lib/telegram/router';
+
+// Локальный тип вместо удалённого router.ts
+export interface BotContext {
+  from: { id: number; username?: string } | undefined;
+  reply(text: string, extra?: unknown): Promise<unknown>;
+  message?: { text?: string };
+}
 
 export async function handleStatus(ctx: BotContext): Promise<void> {
   const from = ctx.from;
