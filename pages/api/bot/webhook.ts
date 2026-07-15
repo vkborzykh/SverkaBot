@@ -515,6 +515,26 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
     const sessionState = await getSession(telegramId);
     const docInfo = { fileId: doc.file_id, fileName: doc.file_name ?? 'file', fileSizeBytes: doc.file_size ?? 0 };
 
+    // Если пользователь уже начал сверку, но ещё не выбрал кабинет,
+    // напоминаем ему об этом и показываем список кабинетов.
+    if (sessionState === 'choosing_cabinet') {
+      const user = await findUserByTelegramId(telegramId);
+      if (user) {
+        const { findCabinetsByUserId } = await import('@/src/db/repositories/wb-cabinets');
+        const cabinets = await findCabinetsByUserId(user.id);
+        await ctx.reply(msg.cabinetMustBeSelected, {
+          reply_markup: {
+            inline_keyboard: cabinets.map((c) => [
+              { text: `${c.id === user.current_cabinet_id ? '✅ ' : ''}${c.name}`, callback_data: `cabinet_pick:${c.id}` },
+            ]),
+          },
+        });
+      } else {
+        await ctx.reply(msg.cabinetMustBeSelected);
+      }
+      return;
+    }
+
     if (sessionState === 'awaiting_wb_file') {
       const { handleWbFileReceived } = await import('@/src/lib/telegram/handlers/upload');
       await handleWbFileReceived(ctx, docInfo);
