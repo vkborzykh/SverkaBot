@@ -73,10 +73,11 @@ export async function handleSubscribe(ctx: Context): Promise<void> {
 
   await ctx.reply(statusText);
 
+  // Кнопки выбора тарифа теперь показывают и месячную, и годовую цену
   const keyboard: { text: string; callback_data: string }[][] = [
-    [{ text: `${TARIFFS.START.label} – 990 ₽/мес`, callback_data: 'tariff_choice:START' }],
-    [{ text: `${TARIFFS.PRO.label} – 1 990 ₽/мес`, callback_data: 'tariff_choice:PRO' }],
-    [{ text: `${TARIFFS.BUSINESS.label} – 4 990 ₽/мес`, callback_data: 'tariff_choice:BUSINESS' }],
+    [{ text: `${TARIFFS.START.label} – 990 ₽/мес (≈7 920 ₽/год)`, callback_data: 'tariff_choice:START' }],
+    [{ text: `${TARIFFS.PRO.label} – 1 990 ₽/мес (≈15 920 ₽/год)`, callback_data: 'tariff_choice:PRO' }],
+    [{ text: `${TARIFFS.BUSINESS.label} – 4 990 ₽/мес (≈39 920 ₽/год)`, callback_data: 'tariff_choice:BUSINESS' }],
   ];
 
   if (user.tariff === 'PRO' && !user.export_addon_active) {
