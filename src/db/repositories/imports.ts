@@ -35,7 +35,7 @@ export async function findImportsByUserId(
     .select()
     .from(imports)
     .where(and(...conditions))
-    .orderBy(desc(imports.created_at)); // ← теперь последние сверху
+    .orderBy(desc(imports.created_at));
   return opts?.limit ? q.limit(opts.limit) : q;
 }
 
