@@ -2,7 +2,12 @@ import { findUserByTelegramId } from '@/src/db/repositories/users';
 import { startReconciliation } from '@/src/lib/reconciliation/startRun';
 import { enqueue } from '@/src/lib/jobs/queue';
 import { msg } from '@/src/lib/telegram/messages.ru';
-import type { BotContext } from '@/src/lib/telegram/router';
+
+// Локальный тип вместо удалённого router.ts
+export interface BotContext {
+  from: { id: number; username?: string } | undefined;
+  reply(text: string, extra?: unknown): Promise<unknown>;
+}
 
 function errorCodeToRussian(code: string): string {
   switch (code) {
