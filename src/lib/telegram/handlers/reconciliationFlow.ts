@@ -12,8 +12,6 @@ import { getDb } from '@/src/db';
 import { reconciliation_runs } from '@/src/db/schema';
 import { eq, and, gte, lte } from 'drizzle-orm';
 
-const TRIAL_LIMIT = 3;
-
 function paywallReply(ctx: Context, text: string) {
   return ctx.reply(text, {
     reply_markup: {
@@ -24,7 +22,7 @@ function paywallReply(ctx: Context, text: string) {
 
 /** Проверяет, не исчерпан ли лимит сверок. Возвращает true, если продолжать нельзя. */
 function checkLimitAndReply(user: any, ctx: Context): boolean {
-  const limit = user.subscription_status === 'TRIAL' ? TRIAL_LIMIT : monthlyLimitFor(user.tariff);
+  const limit = monthlyLimitFor(user.tariff, user.subscription_status, user.trial_expires_at);
   if (limit === null) return false; // безлимит
   const used = user.monthly_reconciliations ?? 0;
   if (used >= limit) {
@@ -171,28 +169,16 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
   }
 
   const used = user.monthly_reconciliations ?? 0;
+  const limit = monthlyLimitFor(user.tariff, user.subscription_status, user.trial_expires_at);
 
-  if (user.subscription_status === 'TRIAL') {
-    if (used >= TRIAL_LIMIT) {
-      await ctx.reply(msg.trialLimitReached(TRIAL_LIMIT), {
-        reply_markup: {
-          inline_keyboard: [[{ text: '💰 Подписка', callback_data: 'subscribe_inline' }]],
-        },
-      });
-      return;
-    }
-  }
-
-  if (user.subscription_status === 'ACTIVE') {
-    const limit = monthlyLimitFor(user.tariff);
-    if (limit !== null && used >= limit) {
-      await ctx.reply(msg.startLimitReached(limit), {
-        reply_markup: {
-          inline_keyboard: [[{ text: msg.upgradeToProButton, callback_data: 'subscribe_inline' }]],
-        },
-      });
-      return;
-    }
+  if (limit !== null && used >= limit) {
+    const message = user.subscription_status === 'TRIAL' ? msg.trialLimitReached(limit) : msg.startLimitReached(limit);
+    await ctx.reply(message, {
+      reply_markup: {
+        inline_keyboard: [[{ text: msg.upgradeToProButton, callback_data: 'subscribe_inline' }]],
+      },
+    });
+    return;
   }
 
   const telegramId = BigInt(ctx.from!.id);
@@ -239,14 +225,11 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
       await updateUser(user.id, { monthly_reconciliations: used + 1 });
     }
 
-    if (user.subscription_status === 'TRIAL') {
-      const currentUsed = existingCompleted.length === 0 ? used + 1 : used;
-      const remaining = TRIAL_LIMIT - currentUsed;
-      if (remaining > 0) {
-        await ctx.reply(`✅ Сверка запущена. Осталось ${remaining} из ${TRIAL_LIMIT} пробных сверок.`);
-      } else {
-        await ctx.reply(msg.syncStarted);
-      }
+    const currentUsed = existingCompleted.length === 0 ? used + 1 : used;
+    const remaining = limit !== null ? limit - currentUsed : null;
+
+    if (remaining !== null && remaining >= 0) {
+      await ctx.reply(`✅ Сверка запущена. Осталось ${remaining} из ${limit} сверок.`);
     } else {
       await ctx.reply(msg.syncStarted);
     }
