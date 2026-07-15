@@ -8,7 +8,12 @@ import { enqueue } from '@/src/lib/jobs/queue';
 import { msg } from '@/src/lib/telegram/messages.ru';
 import { setSession, getSessionPayload } from '@/src/lib/telegram/session';
 import { validateFileContent } from '@/src/lib/ingestion/validateContent';
-import type { BotContext } from '@/src/lib/telegram/router';
+
+// Локальный тип вместо удалённого router.ts
+export interface BotContext {
+  from: { id: number; username?: string } | undefined;
+  reply(text: string, extra?: unknown): Promise<unknown>;
+}
 
 export interface DocumentInfo {
   fileId: string;
