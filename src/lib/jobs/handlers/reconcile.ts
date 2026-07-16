@@ -211,6 +211,7 @@ export async function handleReconcile(job: Job): Promise<void> {
           await notifyUser(user.telegram_id, anomalyMsg);
         }
 
+        // Контекстный апсейл для Старта при недоплате
         if (
           user.tariff === 'START' &&
           result.status === 'underpaid' &&
@@ -219,6 +220,19 @@ export async function handleReconcile(job: Job): Promise<void> {
           await notifyUser(
             user.telegram_id,
             `💡 В этой сверке – ${rub(result.discrepancyKopeks)} невыясненных сумм. Хотите отслеживать тренд по всем проверкам? Оформите Профи – и получите статистику и безлимитные сверки: /subscribe`,
+          );
+        }
+
+        // Контекстный апсейл для PRO без аддона при недоплате
+        if (
+          user.tariff === 'PRO' &&
+          !user.export_addon_active &&
+          result.status === 'underpaid' &&
+          result.discrepancyKopeks > BigInt(0)
+        ) {
+          await notifyUser(
+            user.telegram_id,
+            `🧩 Обнаружена недоплата – ${rub(result.discrepancyKopeks)}. Хотите выгрузить эту сверку для бухгалтера? Подключите экспорт CSV/XLSX/1С за 590 ₽/мес: /subscribe`,
           );
         }
       }
