@@ -90,12 +90,28 @@ export async function GET(req: NextRequest) {
       : 0,
   }));
 
-  // ── Сводка ──
+  // ── Сводка (bigint-арифметика, конвертация в рубли один раз в конце) ──
   const summaryRuns = isPro ? filtered : slice;
   const totalRuns = summaryRuns.length;
-  const totalExpected = summaryRuns.reduce((sum, r) => sum + Number(r.turnover_kopeks ?? 0), 0) / 100;
-  const totalReceived = summaryRuns.reduce((sum, r) => sum + (Number(r.turnover_kopeks ?? 0) - Number(r.loss_kopeks ?? 0)), 0) / 100;
-  const totalLoss = summaryRuns.reduce((sum, r) => sum + Number(r.loss_kopeks ?? 0), 0) / 100;
+
+  // Суммируем копейки как BigInt
+  const totalExpectedKopeks = summaryRuns.reduce(
+    (sum, r) => sum + BigInt(r.turnover_kopeks ?? 0),
+    BigInt(0),
+  );
+  const totalReceivedKopeks = summaryRuns.reduce(
+    (sum, r) => sum + BigInt(r.turnover_kopeks ?? 0) - BigInt(r.loss_kopeks ?? 0),
+    BigInt(0),
+  );
+  const totalLossKopeks = summaryRuns.reduce(
+    (sum, r) => sum + BigInt(r.loss_kopeks ?? 0),
+    BigInt(0),
+  );
+
+  // Конвертируем в рубли для отображения
+  const totalExpected = Number(totalExpectedKopeks) / 100;
+  const totalReceived = Number(totalReceivedKopeks) / 100;
+  const totalLoss = Number(totalLossKopeks) / 100;
   const avgLossPercent = totalExpected > 0 ? (totalLoss / totalExpected) * 100 : 0;
 
   const summary = {
@@ -161,14 +177,14 @@ export async function GET(req: NextRequest) {
   // ── Тренд по месяцам (только для Pro) ──
   let monthlyTrend: any = undefined;
   if (isPro) {
-    const monthMap = new Map<string, { expected: number; received: number; loss: number; count: number }>();
+    const monthMap = new Map<string, { expectedKopeks: bigint; receivedKopeks: bigint; lossKopeks: bigint; count: number }>();
     for (const run of filtered) {
       if (!run.created_at) continue;
       const key = monthLabel(new Date(run.created_at));
-      const entry = monthMap.get(key) || { expected: 0, received: 0, loss: 0, count: 0 };
-      entry.expected += Number(run.turnover_kopeks ?? 0) / 100;
-      entry.received += (Number(run.turnover_kopeks ?? 0) - Number(run.loss_kopeks ?? 0)) / 100;
-      entry.loss += Number(run.loss_kopeks ?? 0) / 100;
+      const entry = monthMap.get(key) || { expectedKopeks: BigInt(0), receivedKopeks: BigInt(0), lossKopeks: BigInt(0), count: 0 };
+      entry.expectedKopeks += BigInt(run.turnover_kopeks ?? 0);
+      entry.receivedKopeks += BigInt(run.turnover_kopeks ?? 0) - BigInt(run.loss_kopeks ?? 0);
+      entry.lossKopeks += BigInt(run.loss_kopeks ?? 0);
       entry.count += 1;
       monthMap.set(key, entry);
     }
@@ -177,10 +193,14 @@ export async function GET(req: NextRequest) {
       .slice(-12);
     monthlyTrend = {
       labels: months.map(([key]) => key),
-      expected: months.map(([, v]) => v.expected),
-      received: months.map(([, v]) => v.received),
-      loss: months.map(([, v]) => v.loss),
-      lossPercent: months.map(([, v]) => (v.expected > 0 ? Math.round((v.loss / v.expected) * 10000) / 100 : 0)),
+      expected: months.map(([, v]) => Number(v.expectedKopeks) / 100),
+      received: months.map(([, v]) => Number(v.receivedKopeks) / 100),
+      loss: months.map(([, v]) => Number(v.lossKopeks) / 100),
+      lossPercent: months.map(([, v]) => {
+        const exp = Number(v.expectedKopeks);
+        const loss = Number(v.lossKopeks);
+        return exp > 0 ? Math.round((loss / exp) * 10000) / 100 : 0;
+      }),
     };
   }
 
