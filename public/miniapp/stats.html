@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Статистика SverkaBot</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="/miniapp/chart.min.js"></script>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
@@ -18,6 +18,13 @@
       color: red;
       padding: 16px;
     }
+    .summary {
+      margin: 12px 0;
+      padding: 12px;
+      background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+      border-radius: 8px;
+    }
+    .summary p { margin: 4px 0; }
     canvas {
       max-width: 100%;
       margin-top: 16px;
@@ -37,6 +44,7 @@
   <select id="cabinet">
     <option value="">Все кабинеты</option>
   </select>
+  <div id="summary" class="summary" style="display:none;"></div>
   <canvas id="chart" width="400" height="300"></canvas>
 
   <script>
@@ -46,7 +54,12 @@
 
     const cabinetSelect = document.getElementById('cabinet');
     const errorDiv = document.getElementById('error');
+    const summaryDiv = document.getElementById('summary');
     let chart = null;
+
+    function formatRub(value) {
+      return value.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₽';
+    }
 
     async function loadData(cabinetId = '') {
       try {
@@ -79,6 +92,19 @@
           cabinetSelect.appendChild(opt);
         }
         cabinetSelect.value = cabinetId;
+
+        // Отображаем текстовую сводку
+        if (data.summary) {
+          summaryDiv.innerHTML =
+            `<p><strong>Всего сверок:</strong> ${data.summary.totalRuns}</p>` +
+            `<p><strong>Ожидалось к выплате:</strong> ${formatRub(data.summary.totalExpected)}</p>` +
+            `<p><strong>Поступило:</strong> ${formatRub(data.summary.totalReceived)}</p>` +
+            `<p><strong>Неподтверждённые выплаты:</strong> ${formatRub(data.summary.totalLoss)}</p>` +
+            `<p><strong>Средний % потерь:</strong> ${data.summary.avgLossPercent}%</p>`;
+          summaryDiv.style.display = 'block';
+        } else {
+          summaryDiv.style.display = 'none';
+        }
 
         // Рисуем график
         renderChart(data.chart);
