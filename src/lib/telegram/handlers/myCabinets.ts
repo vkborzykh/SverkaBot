@@ -34,7 +34,7 @@ function cabinetsKeyboard(
     rows.push([{ text: msg.addCabinetButton, callback_data: 'cabinet_add' }]);
   }
   if (isBusiness) {
-    rows.push([{ text: '📊 Сводный отчёт (все кабинеты)', callback_data: 'summary_export:all' }]);
+    rows.push([{ text: '📊 Сводный отчёт (все кабинеты)', callback_data: 'summary_period_pick:all' }]);
   }
   if (showUpgrade) {
     rows.push([{ text: msg.upgradeToBusinessButton, callback_data: 'tariff_business' }]);
