@@ -32,6 +32,19 @@ const HEADER = [
   'Статус',
 ];
 
+const EXPLANATION_ROW = [
+  '# Сверка выплат Wildberries (SverkaBot)',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+];
+
 export async function build1cForRun(runId: string): Promise<Buffer> {
   const agg = await getRunAggregates(runId);
 
@@ -58,6 +71,10 @@ export async function build1cForRun(runId: string): Promise<Buffer> {
     agg.statusLabel,
   ];
 
-  const lines = [HEADER.join(SEP), row.join(SEP)];
+  const lines = [
+    EXPLANATION_ROW.join(SEP),
+    HEADER.join(SEP),
+    row.join(SEP),
+  ];
   return Buffer.from('\uFEFF' + lines.join('\r\n') + '\r\n', 'utf-8');
 }
