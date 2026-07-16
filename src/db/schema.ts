@@ -293,6 +293,7 @@ export const canonical_transactions = pgTable(
     reference: text('reference'),
     description: text('description'),
     counterparty: text('counterparty'),
+    category: text('category'),
     row_hash: text('row_hash'),
     raw_payload: jsonb('raw_payload'),
     created_at: timestamp('created_at', { withTimezone: true })
