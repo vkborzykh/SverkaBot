@@ -7,23 +7,17 @@
 // - Листы "Недоплаты" и "Все выплаты" удалены полностью. Они пытались
 //   показать попарное соответствие WB-строка <-> банковская операция,
 //   которого нет в движке сверки (сравнивается только агрегат за весь
-//   отчёт). Патчить их точечно нельзя — сама идея строки в проекте неверна:
-//     * "Недоплаты" фильтровала wbTxs по membership в Set банковских id
-//       (matchedBankTxIds), из-за чего условие было истинным всегда —
-//       на листе оказывались вообще все WB-транзакции.
-//     * "Все выплаты" делала bankTxs.find(...) один раз вне цикла по tx,
-//       поэтому одна и та же (первая попавшаяся) банковская операция
-//       подставлялась во все строки.
+//   отчёт). Патчить их точечно нельзя — сама идея строки в проекте неверна.
 // - Вместо них — лист "Банк — исходные данные" с честным флагом
 //   "Отнесено к WB" (да/нет) на каждую банковскую строку. Это не выдуманное
 //   соответствие конкретной WB-строке, а реальный факт, который движок
 //   действительно вычисляет: было ли поступление учтено как WB-платёж.
 // - Денежные суммы теперь через toRubNumber() (числовые ячейки с форматированием)
 //   вместо formatRub() (текст), что позволяет суммировать и фильтровать в Excel.
-// - "Метаданные": хэш теперь считается от РЕАЛЬНОГО содержимого (сумм и
-//   хэшей строк), а не от runId — раньше sha256(Buffer.from(runId)) не
-//   проверял вообще ничего, так как runId и так известен получателю.
-// - Убрана текстовая заглушка про диаграмму на листе "Сводка".
+// - Лист «Метаданные» удалён полностью — ID сверки и другая техническая
+//   информация не несут ценности для продавца или бухгалтера.
+// - Формат ячейки «Разница» теперь двухцветный: зелёный для положительных,
+//   красный для отрицательных (условное форматирование по знаку).
 
 import * as XLSX from 'xlsx';
 import {
@@ -33,6 +27,9 @@ import {
   applyRubNumberFormat,
   fmtDate,
 } from './runAggregates';
+
+const RUB_FMT = '#,##0.00;[Red]-#,##0.00';
+const DIFF_FMT = '[Green]#,##0.00;[Red]-#,##0.00';
 
 export async function buildXlsxForRun(runId: string): Promise<Buffer> {
   const agg = await getRunAggregates(runId);
@@ -55,10 +52,13 @@ export async function buildXlsxForRun(runId: string): Promise<Buffer> {
   ];
   const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
   // Применяем числовой формат для денежных строк (строки 5,6,7 в колонке B)
-  for (const row of [5, 6, 7]) {
+  for (const row of [5, 6]) {
     const cell = wsSummary[`B${row}`];
-    if (cell && cell.t === 'n') cell.z = '#,##0.00;[Red]-#,##0.00';
+    if (cell && cell.t === 'n') cell.z = RUB_FMT;
   }
+  // Строка 7 — Разница: двухцветный формат
+  const diffCell = wsSummary[`B7`];
+  if (diffCell && diffCell.t === 'n') diffCell.z = DIFF_FMT;
   XLSX.utils.book_append_sheet(wb, wsSummary, 'Сводка');
 
   // Лист 2: WB — исходные данные
@@ -87,17 +87,6 @@ export async function buildXlsxForRun(runId: string): Promise<Buffer> {
   const wsBank = XLSX.utils.aoa_to_sheet([bankHeader, ...bankRows]);
   applyRubNumberFormat(wsBank, ['E'], bankRows.length + 1);
   XLSX.utils.book_append_sheet(wb, wsBank, 'Банк — исходные данные');
-
-  // Лист 4: Метаданные
-  const metaData = [
-    ['Версия бота', 'bank_v2'],
-    ['Алгоритм сверки', 'wb_net_payout'],
-    ['Дата формирования файла', fmtDate(new Date())],
-    ['UUID сверки', agg.runId],
-    ['Хэш содержимого (проверка целостности)', agg.contentHash],
-  ];
-  const wsMeta = XLSX.utils.aoa_to_sheet(metaData);
-  XLSX.utils.book_append_sheet(wb, wsMeta, 'Метаданные');
 
   return Buffer.from(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
 }
