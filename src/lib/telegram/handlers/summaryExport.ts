@@ -2,7 +2,7 @@ import type { Context } from 'telegraf';
 import { findUserByTelegramId } from '@/src/db/repositories/users';
 import { findRunsByUserId } from '@/src/db/repositories/reconciliation-runs';
 import { findImportById } from '@/src/db/repositories/imports';
-import { buildCombinedCsv, buildCombinedXlsx, buildCombined1c } from '@/src/lib/reports/combinedExport';
+import { buildCombinedXlsx } from '@/src/lib/reports/combinedExport';
 import { hasBusinessFeatures } from '@/src/lib/billing/tariffs';
 
 // Локальный тип вместо удалённого router.ts
@@ -52,17 +52,20 @@ export async function handleSummaryExport(ctx: BotContext, cabinetId?: string): 
     return;
   }
 
-  // Собираем массив run.id для функций сводного экспорта
+  // Собираем массив run.id для функции сводного экспорта
   const runIds = filtered.map(r => r.id);
 
   try {
-    const csvBuffer = await buildCombinedCsv(runIds);
     const xlsxBuffer = await buildCombinedXlsx(runIds);
-    const onecBuffer = await buildCombined1c(runIds);
+    const caption = `Сводный отчёт: ${label}, сверок за период: ${filtered.length}`;
 
-    await sendDocument(user.telegram_id!, csvBuffer, `Sverka_сводка_${label}_${Date.now()}.csv`, 'text/csv', 'Сводный CSV по всем сверкам');
-    await sendDocument(user.telegram_id!, xlsxBuffer, `Sverka_сводка_${label}_${Date.now()}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Сводный Excel');
-    await sendDocument(user.telegram_id!, onecBuffer, `Sverka_1C_сводка_${label}_${Date.now()}.csv`, 'text/csv', 'Реестр 1С по всем сверкам');
+    await sendDocument(
+      user.telegram_id!,
+      xlsxBuffer,
+      `Sverka_сводка_${label}_${Date.now()}.xlsx`,
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      caption,
+    );
   } catch (err) {
     console.error('[summaryExport] error:', err);
     await ctx.reply('Не удалось сформировать сводный отчёт. Попробуйте позже.');
