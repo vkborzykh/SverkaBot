@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyTelegramInitData } from '@/src/lib/security/telegramWebApp';
 import { findUserByTelegramId } from '@/src/db/repositories/users';
 import { findRunsByUserId } from '@/src/db/repositories/reconciliation-runs';
-import { findCabinetsByUserId } from '@/src/db/repositories/wb-cabinets';
+import { findCabinetsByUserId, findCabinetById } from '@/src/db/repositories/wb-cabinets';
 import { hasProFeatures } from '@/src/lib/billing/tariffs';
 import { getRunAggregates, formatRub } from '@/src/lib/reports/runAggregates';
 
@@ -37,19 +37,23 @@ export async function GET(req: NextRequest) {
   const runs = await findRunsByUserId(user.id, 200);
   const completed = runs.filter(r => r.status === 'COMPLETED');
 
-  // Если передан фильтр по кабинету, фильтруем
+  // Если передан фильтр по кабинету, проверяем владение и фильтруем
   const cabinetId = req.nextUrl.searchParams.get('cabinet_id');
   let filtered = completed;
   if (cabinetId) {
-    const { findImportById } = await import('@/src/db/repositories/imports');
-    const filteredRuns: typeof completed = [];
-    for (const run of completed) {
-      const wbImport = await findImportById(run.wb_import_id);
-      if ((wbImport as any)?.cabinet_id === cabinetId) {
-        filteredRuns.push(run);
+    const cabinet = await findCabinetById(cabinetId);
+    if (cabinet && cabinet.user_id === user.id) {
+      const { findImportById } = await import('@/src/db/repositories/imports');
+      const filteredRuns: typeof completed = [];
+      for (const run of completed) {
+        const wbImport = await findImportById(run.wb_import_id);
+        if ((wbImport as any)?.cabinet_id === cabinetId) {
+          filteredRuns.push(run);
+        }
       }
+      filtered = filteredRuns;
     }
-    filtered = filteredRuns;
+    // else — игнорируем невалидный cabinet_id, возвращаем все сверки пользователя
   }
 
   // Собираем агрегаты для графика (последние 12, сортировка по дате)
