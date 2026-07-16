@@ -77,13 +77,17 @@ const CATEGORY_PRIORITY = [
   'категория',
 ];
 
-// Карта ключевых слов для выделения удержаний в отдельные транзакции
+// Карта якорных фраз для выделения удержаний в отдельные транзакции
+// Фразы подобраны под реальный 81-колоночный отчёт WB (детализация).
+// Используются якорные (длинные) совпадения, чтобы не путать колонку
+// «Вознаграждение с продаж до вычета услуг поверенного» (выручка, не удержание)
+// с колонкой «Вознаграждение Вайлдберриз (ВВ), без НДС» (комиссия WB).
 const DEDUCTION_COLUMNS = [
-  { keywords: ['логистик', 'logistic', 'доставк', 'delivery'], category: 'LOGISTICS' },
-  { keywords: ['хранение', 'хранен', 'storage', 'склад'], category: 'STORAGE' },
-  { keywords: ['штраф', 'penalty', 'неустойк', 'fine'], category: 'PENALTY' },
-  { keywords: ['возврат', 'refund', 'отмен'], category: 'REFUND' },
-  { keywords: ['комисси', 'commission', 'вознагражд'], category: 'COMMISSION' },
+  { keywords: ['услуги по доставке', 'логистик'], category: 'LOGISTICS' },
+  { keywords: ['хранение'], category: 'STORAGE' },
+  { keywords: ['общая сумма штрафов'], category: 'PENALTY' },
+  { keywords: ['удержания'], category: 'DEDUCTION' },
+  { keywords: ['вознаграждение вайлдберриз'], category: 'COMMISSION' },
   { keywords: ['реклам', 'продвижен', 'маркетинг', 'advert'], category: 'MARKETING' },
 ];
 
