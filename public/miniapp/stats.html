@@ -35,17 +35,77 @@
       width: 100%;
       max-width: 300px;
     }
+    .mode-btns {
+      display: flex;
+      gap: 6px;
+      margin: 8px 0 16px;
+      flex-wrap: wrap;
+    }
+    .mode-btn {
+      padding: 8px 14px;
+      border: 1px solid var(--tg-theme-hint-color, #ccc);
+      background: var(--tg-theme-bg-color, #fff);
+      color: var(--tg-theme-text-color, #000);
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .mode-btn.active {
+      background: var(--tg-theme-button-color, #2ea6ff);
+      color: var(--tg-theme-button-text-color, #fff);
+      border-color: var(--tg-theme-button-color, #2ea6ff);
+    }
+    .preview-lock {
+      margin: 20px 0;
+      padding: 24px;
+      text-align: center;
+      background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+      border-radius: 12px;
+    }
+    .preview-lock .lock-icon {
+      font-size: 40px;
+    }
+    .preview-lock p {
+      margin: 8px 0;
+      color: var(--tg-theme-hint-color, #888);
+    }
+    .preview-lock .upgrade-btn {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 10px 20px;
+      background: var(--tg-theme-button-color, #2ea6ff);
+      color: var(--tg-theme-button-text-color, #fff);
+      border-radius: 10px;
+      text-decoration: none;
+      font-weight: 600;
+    }
   </style>
 </head>
 <body>
   <h2>📈 Статистика выплат</h2>
   <div id="error" class="error" style="display:none;"></div>
-  <label for="cabinet">Кабинет WB:</label>
-  <select id="cabinet">
-    <option value="">Все кабинеты</option>
-  </select>
-  <div id="summary" class="summary" style="display:none;"></div>
-  <canvas id="chart" width="400" height="300"></canvas>
+  <div id="previewBlock" class="preview-lock" style="display:none;">
+    <div class="lock-icon">🔒</div>
+    <p>Чтобы видеть полную статистику и тренды, оформите Профи</p>
+    <a class="upgrade-btn" href="https://t.me/SverkaProBot?start=subscribe" target="_blank">Оформить Профи</a>
+  </div>
+
+  <div id="mainContent">
+    <label for="cabinet">Кабинет WB:</label>
+    <select id="cabinet">
+      <option value="">Все кабинеты</option>
+    </select>
+
+    <div class="mode-btns" id="modeBtns" style="display:none;">
+      <button class="mode-btn active" data-mode="runs">По сверкам</button>
+      <button class="mode-btn" data-mode="monthly">По месяцам</button>
+      <button class="mode-btn" data-mode="cabinet">По кабинетам</button>
+    </div>
+
+    <div id="summary" class="summary" style="display:none;"></div>
+    <canvas id="chart" width="400" height="300"></canvas>
+    <div id="drillInfo" class="summary" style="display:none; margin-top: 10px;"></div>
+  </div>
 
   <script>
     const tg = window.Telegram.WebApp;
@@ -55,26 +115,46 @@
     const cabinetSelect = document.getElementById('cabinet');
     const errorDiv = document.getElementById('error');
     const summaryDiv = document.getElementById('summary');
+    const previewBlock = document.getElementById('previewBlock');
+    const mainContent = document.getElementById('mainContent');
+    const modeBtns = document.getElementById('modeBtns');
+    const drillInfo = document.getElementById('drillInfo');
+
     let chart = null;
+    let currentMode = 'runs';
+    let lastData = null;       // результат последнего обычного запроса (runs/monthly)
+    let lastCabinetData = null; // результат запроса by_cabinet
+    let currentCabinetId = '';
 
     function formatRub(value) {
       return value.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₽';
     }
 
-    async function loadData(cabinetId = '') {
+    function activateMode(mode) {
+      document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
+      const activeBtn = document.querySelector(`.mode-btn[data-mode="${mode}"]`);
+      if (activeBtn) activeBtn.classList.add('active');
+      currentMode = mode;
+      drillInfo.style.display = 'none';
+
+      if (mode === 'cabinet') {
+        loadCabinetData(currentCabinetId);
+      } else if (lastData) {
+        renderByMode(mode);
+      } else {
+        loadData(currentCabinetId);
+      }
+    }
+
+    async function loadData(cabinetId) {
       try {
         const initData = tg.initData;
-        if (!initData) {
-          throw new Error('initData отсутствует (возможно, приложение открыто не из Telegram)');
-        }
+        if (!initData) throw new Error('initData отсутствует');
 
         const url = new URL('/api/miniapp/stats', window.location.origin);
         if (cabinetId) url.searchParams.set('cabinet_id', cabinetId);
 
-        const res = await fetch(url.toString(), {
-          headers: { 'Authorization': `tma ${initData}` }
-        });
-
+        const res = await fetch(url, { headers: { 'Authorization': `tma ${initData}` } });
         if (!res.ok) {
           const err = await res.json();
           throw new Error(err.error || `HTTP ${res.status}`);
@@ -82,6 +162,9 @@
 
         const data = await res.json();
         if (!data.ok) throw new Error('Invalid response');
+
+        lastData = data;
+        currentCabinetId = cabinetId;
 
         // Обновляем список кабинетов
         cabinetSelect.innerHTML = '<option value="">Все кабинеты</option>';
@@ -93,21 +176,28 @@
         }
         cabinetSelect.value = cabinetId;
 
-        // Отображаем текстовую сводку
-        if (data.summary) {
-          summaryDiv.innerHTML =
-            `<p><strong>Всего сверок:</strong> ${data.summary.totalRuns}</p>` +
-            `<p><strong>Ожидалось к выплате:</strong> ${formatRub(data.summary.totalExpected)}</p>` +
-            `<p><strong>Поступило:</strong> ${formatRub(data.summary.totalReceived)}</p>` +
-            `<p><strong>Неподтверждённые выплаты:</strong> ${formatRub(data.summary.totalLoss)}</p>` +
-            `<p><strong>Средний % потерь:</strong> ${data.summary.avgLossPercent}%</p>`;
-          summaryDiv.style.display = 'block';
+        // Превью режим
+        if (data.preview) {
+          previewBlock.style.display = 'block';
+          mainContent.style.display = 'none';
+          modeBtns.style.display = 'none';
+          return;
         } else {
-          summaryDiv.style.display = 'none';
+          previewBlock.style.display = 'none';
+          mainContent.style.display = '';
+          modeBtns.style.display = 'flex';
         }
 
-        // Рисуем график
-        renderChart(data.chart);
+        // Показываем кнопки смены режима для Pro
+        const showMonthly = !!data.monthlyTrend;
+        const showCabinetBtn = data.cabinets.length > 1;
+        document.querySelector('.mode-btn[data-mode="monthly"]').style.display = showMonthly ? '' : 'none';
+        document.querySelector('.mode-btn[data-mode="cabinet"]').style.display = showCabinetBtn ? '' : 'none';
+
+        // Сводка
+        renderSummary(data.summary);
+        // Рендерим текущий режим
+        renderByMode(currentMode);
         errorDiv.style.display = 'none';
       } catch (err) {
         errorDiv.textContent = 'Ошибка загрузки: ' + err.message;
@@ -115,7 +205,50 @@
       }
     }
 
-    function renderChart(chartData) {
+    async function loadCabinetData(cabinetId) {
+      try {
+        const initData = tg.initData;
+        const url = new URL('/api/miniapp/stats', window.location.origin);
+        url.searchParams.set('by_cabinet', 'true');
+        if (cabinetId) url.searchParams.set('cabinet_id', cabinetId);
+
+        const res = await fetch(url, { headers: { 'Authorization': `tma ${initData}` } });
+        if (!res.ok) throw new Error('Ошибка загрузки данных по кабинетам');
+
+        const data = await res.json();
+        if (!data.ok) throw new Error('Invalid response');
+        lastCabinetData = data;
+        renderCabinetChart(data.cabinetChart);
+      } catch (err) {
+        errorDiv.textContent = 'Ошибка загрузки данных по кабинетам: ' + err.message;
+        errorDiv.style.display = 'block';
+      }
+    }
+
+    function renderSummary(summary) {
+      if (!summary) {
+        summaryDiv.style.display = 'none';
+        return;
+      }
+      summaryDiv.innerHTML =
+        `<p><strong>Всего сверок:</strong> ${summary.totalRuns}</p>` +
+        `<p><strong>Ожидалось к выплате:</strong> ${formatRub(summary.totalExpected)}</p>` +
+        `<p><strong>Поступило:</strong> ${formatRub(summary.totalReceived)}</p>` +
+        `<p><strong>Неподтверждённые выплаты:</strong> ${formatRub(summary.totalLoss)}</p>` +
+        `<p><strong>Средний % потерь:</strong> ${summary.avgLossPercent}%</p>`;
+      summaryDiv.style.display = 'block';
+    }
+
+    function renderByMode(mode) {
+      if (!lastData) return;
+      if (mode === 'monthly') {
+        renderMonthlyChart(lastData.monthlyTrend);
+      } else {
+        renderRunChart(lastData.chart, lastData.drill);
+      }
+    }
+
+    function renderRunChart(chartData, drill) {
       const ctx = document.getElementById('chart').getContext('2d');
       if (chart) chart.destroy();
 
@@ -124,25 +257,23 @@
         data: {
           labels: chartData.labels,
           datasets: [
-            {
-              label: 'Ожидалось (₽)',
-              data: chartData.expected,
-              backgroundColor: 'rgba(54, 162, 235, 0.7)',
-            },
-            {
-              label: 'Поступило (₽)',
-              data: chartData.received,
-              backgroundColor: 'rgba(75, 192, 192, 0.7)',
-            },
-            {
-              label: 'Расхождение (₽)',
-              data: chartData.loss,
-              backgroundColor: 'rgba(255, 99, 132, 0.7)',
-            },
+            { label: 'Ожидалось (₽)', data: chartData.expected, backgroundColor: 'rgba(54, 162, 235, 0.7)' },
+            { label: 'Поступило (₽)', data: chartData.received, backgroundColor: 'rgba(75, 192, 192, 0.7)' },
+            { label: 'Расхождение (₽)', data: chartData.loss, backgroundColor: 'rgba(255, 99, 132, 0.7)' },
           ],
         },
         options: {
           responsive: true,
+          onClick: (e, elements) => {
+            if (elements.length > 0 && drill) {
+              const idx = elements[0].index;
+              const d = drill[idx];
+              if (d) {
+                drillInfo.innerHTML = `<strong>Сверка:</strong> ${d.label}<br><strong>% потерь:</strong> ${d.lossPercent}%<br><small>ID: ${d.runId}</small>`;
+                drillInfo.style.display = 'block';
+              }
+            }
+          },
           plugins: {
             title: { display: true, text: 'Динамика выплат' },
           },
@@ -154,12 +285,95 @@
       });
     }
 
+    function renderMonthlyChart(monthlyTrend) {
+      if (!monthlyTrend) {
+        alert('Данные по месяцам доступны только на тарифе Профи.');
+        return;
+      }
+      const ctx = document.getElementById('chart').getContext('2d');
+      if (chart) chart.destroy();
+
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: monthlyTrend.labels,
+          datasets: [
+            {
+              label: '% потерь от оборота',
+              data: monthlyTrend.lossPercent,
+              borderColor: 'rgba(255, 99, 132, 1)',
+              backgroundColor: 'rgba(255, 99, 132, 0.1)',
+              fill: true,
+              tension: 0.3,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            title: { display: true, text: 'Тренд % недоплат по месяцам' },
+          },
+          scales: {
+            y: { beginAtZero: true, title: { display: true, text: '%' } },
+          },
+        },
+      });
+    }
+
+    function renderCabinetChart(cabinetChartData) {
+      if (!cabinetChartData) {
+        alert('Нет данных по кабинетам.');
+        return;
+      }
+      const ctx = document.getElementById('chart').getContext('2d');
+      if (chart) chart.destroy();
+
+      const datasets = cabinetChartData.datasets.map(ds => ({
+        label: ds.cabinetName,
+        data: ds.expected, // или можно loss/expected/received — выберем expected для сравнения
+        backgroundColor: `hsl(${Math.floor(Math.random() * 360)}, 70%, 70%)`,
+      }));
+
+      chart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: cabinetChartData.labels,
+          datasets: datasets,
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            title: { display: true, text: 'Ожидаемые выплаты по кабинетам' },
+          },
+          scales: {
+            x: { stacked: true },
+            y: { stacked: true, beginAtZero: true },
+          },
+        },
+      });
+    }
+
+    // Обработчики
     cabinetSelect.addEventListener('change', () => {
-      loadData(cabinetSelect.value);
+      const cabId = cabinetSelect.value;
+      lastData = null;
+      lastCabinetData = null;
+      if (currentMode === 'cabinet') {
+        loadCabinetData(cabId);
+      } else {
+        loadData(cabId);
+      }
+    });
+
+    modeBtns.addEventListener('click', (e) => {
+      if (e.target.classList.contains('mode-btn')) {
+        const mode = e.target.dataset.mode;
+        if (mode) activateMode(mode);
+      }
     });
 
     // Первая загрузка
-    loadData();
+    loadData('');
   </script>
 </body>
 </html>
