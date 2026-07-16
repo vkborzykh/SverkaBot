@@ -7,8 +7,8 @@ import { enqueue } from '@/src/lib/jobs/queue';
 import { clearSession } from '@/src/lib/telegram/session';
 import { hasProFeatures, hasBusinessFeatures, monthlyLimitFor } from '@/src/lib/billing/tariffs';
 import { getDb } from '@/src/db';
-import { reconciliation_runs } from '@/src/db/schema';
-import { eq, and, gte, lte } from 'drizzle-orm';
+import { reconciliation_runs, canonical_transactions } from '@/src/db/schema';
+import { eq, and, gte, lte, sql } from 'drizzle-orm';
 
 // Построчный движок (shadow-прогон)
 import { generateCandidates } from '@/src/lib/reconciliation/candidates';
@@ -46,7 +46,53 @@ function rub(kopeks: bigint): string {
   return `${neg ? '−' : ''}${grouped},${cents.toString().padStart(2, '0')} ₽`;
 }
 
-function buildUserMessage(r: WbPayoutResult): string {
+// Локализованные названия категорий
+const CATEGORY_LABELS: Record<string, string> = {
+  LOGISTICS: 'логистика',
+  STORAGE: 'хранение',
+  PENALTY: 'штрафы',
+  REFUND: 'возвраты',
+  COMMISSION: 'комиссия',
+  MARKETING: 'реклама',
+  DEDUCTION: 'прочие удержания',
+  OTHER: 'прочие',
+};
+
+async function getWbDeductionsByCategory(wbImportId: string): Promise<Record<string, bigint>> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      category: canonical_transactions.category,
+      total: sql<bigint>`COALESCE(SUM(${canonical_transactions.amount_kopeks}), 0)`.mapWith(Number),
+    })
+    .from(canonical_transactions)
+    .where(
+      and(
+        eq(canonical_transactions.import_id, wbImportId),
+        eq(canonical_transactions.direction, 'OUT'),
+      ),
+    )
+    .groupBy(canonical_transactions.category);
+
+  const map: Record<string, bigint> = {};
+  for (const row of rows) {
+    const cat = row.category || 'OTHER';
+    map[cat] = (map[cat] || BigInt(0)) + BigInt(row.total);
+  }
+  return map;
+}
+
+function buildDeductionText(deductions: Record<string, bigint>): string {
+  const parts = Object.entries(deductions)
+    .filter(([, amount]) => amount > BigInt(0))
+    .sort(([, a], [, b]) => (b > a ? 1 : -1))
+    .map(([cat, amount]) => `${CATEGORY_LABELS[cat] || cat}: ${rub(amount)}`);
+
+  if (parts.length === 0) return '';
+  return 'Из них:\n' + parts.map((p) => `• ${p}`).join('\n');
+}
+
+async function buildUserMessage(r: WbPayoutResult, wbImportId: string): Promise<string> {
   const e = rub(r.expectedNetKopeks);
   const got = rub(r.receivedKopeks);
   let message = `✅ Сверка завершена. Ожидалось к выплате: ${e}. Поступило от Wildberries: ${got}.`;
@@ -57,10 +103,17 @@ function buildUserMessage(r: WbPayoutResult): string {
     case 'overpaid':
       message += '\nПоступило больше ожидаемого.';
       break;
-    case 'underpaid':
+    case 'underpaid': {
       message += `\nВозможная недоплата: ${rub(r.discrepancyKopeks)}.`;
-      message += '\n💡 Возможная причина: удержания за логистику, хранение или возвраты.';
+      const deductions = await getWbDeductionsByCategory(wbImportId);
+      const deductionText = buildDeductionText(deductions);
+      if (deductionText) {
+        message += '\n' + deductionText;
+      } else {
+        message += '\n💡 Возможная причина: удержания за логистику, хранение или возвраты.';
+      }
       break;
+    }
     case 'missing':
       message += '\nПоступлений от Wildberries не найдено.';
       message += '\n💡 Возможная причина: выплата задержана или поступит позже.';
@@ -141,9 +194,7 @@ async function runRowLevelShadow(
     await updateCandidateScores(runId);
     // 3. Глобальное сопоставление (dryRun, без записи в БД)
     const stats = await globalMatch(runId, { dryRun: true });
-    // 4. Обнаружение split/combined (тоже dryRun – detectSplitCombined всегда пишет в БД,
-    //    но в shadow-режиме мы не должны менять prod. Пока опустим, так как без предварительных
-    //    матчей split/combined не найдёт ничего. Для чистоты вызовем с try/catch.)
+    // 4. Обнаружение split/combined
     try {
       await detectSplitCombined(runId);
     } catch {
@@ -273,9 +324,10 @@ export async function handleReconcile(job: Job): Promise<void> {
 
         await notifyUser(user.telegram_id, '📄 Формирую отчёт (шаг 3/3)');
 
+        const userMessage = await buildUserMessage(result, run.wb_import_id);
         await notifyUser(
           user.telegram_id,
-          buildUserMessage(result) + '\n\n📄 Готовлю отчёт – он придёт в течение минуты.',
+          userMessage + '\n\n📄 Готовлю отчёт – он придёт в течение минуты.',
         );
 
         const streak = await getStreak(user.id);
