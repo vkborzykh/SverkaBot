@@ -84,6 +84,11 @@ export async function handleSubscribe(ctx: Context): Promise<void> {
     keyboard.push([{ text: '🧩 Экспорт для бухгалтера – 590 ₽/мес', callback_data: 'tariff_export_addon' }]);
   }
 
+  // Показываем кнопку аддона и для Старта, если ещё не подключён
+  if (user.tariff === 'START' && !user.export_addon_active) {
+    keyboard.push([{ text: '🧩 Экспорт для бухгалтера – 590 ₽/мес', callback_data: 'tariff_export_addon' }]);
+  }
+
   await ctx.reply(msg.chooseTariffPrompt, {
     reply_markup: { inline_keyboard: keyboard },
   });
@@ -132,18 +137,17 @@ async function sendInvoiceForPeriod(ctx: Context, userId: string, tariffKey: Tar
   const t = TARIFFS[tariffKey];
   let finalPrice = priceKopeks;
 
-  if (days === 30) {
-    try {
-      const currentUser = await findUserById(userId);
-      if (currentUser && currentUser.invited_by) {
-        const inviter = await findUserByTelegramId(currentUser.invited_by);
-        if (inviter && inviter.subscription_status === 'ACTIVE') {
-          finalPrice = Math.round(priceKopeks * 0.8);
-        }
+  // Реферальная скидка 20% для любой подписки (месяц/год)
+  try {
+    const currentUser = await findUserById(userId);
+    if (currentUser && currentUser.invited_by) {
+      const inviter = await findUserByTelegramId(currentUser.invited_by);
+      if (inviter && inviter.subscription_status === 'ACTIVE') {
+        finalPrice = Math.round(priceKopeks * 0.8);
       }
-    } catch (e) {
-      console.error('Referral discount check failed:', e);
     }
+  } catch (e) {
+    console.error('Referral discount check failed:', e);
   }
 
   const periodLabel = days === 365 ? '(год)' : '(месяц)';
@@ -174,7 +178,7 @@ async function sendInvoiceForPeriod(ctx: Context, userId: string, tariffKey: Tar
 async function sendExportAddonInvoice(ctx: Context, userId: string) {
   await ctx.replyWithInvoice({
     title: 'SverkaBot – Экспорт для бухгалтера',
-    description: 'Дополнительный модуль экспорта CSV/XLSX/1С на 30 дней (только для тарифа Профи)',
+    description: 'Дополнительный модуль экспорта CSV/XLSX/1С на 30 дней (для тарифов Старт и Профи)',
     payload: `addon_export_${userId}_${Date.now()}`,
     provider_token: process.env.TELEGRAM_PROVIDER_TOKEN!,
     currency: 'RUB',
@@ -197,8 +201,9 @@ async function sendExportAddonInvoice(ctx: Context, userId: string) {
 export async function handleExportAddon(ctx: Context): Promise<void> {
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user) return;
-  if (user.tariff !== 'PRO') {
-    await ctx.answerCbQuery('Аддон доступен только на тарифе Профи', { show_alert: true });
+  // Аддон теперь доступен на Старте и Профи
+  if (user.tariff !== 'PRO' && user.tariff !== 'START') {
+    await ctx.answerCbQuery('Аддон доступен на тарифах Старт и Профи', { show_alert: true });
     return;
   }
   if (user.export_addon_active) {
@@ -233,11 +238,11 @@ export async function handleReferral(ctx: Context): Promise<void> {
 
   if (canEarnBonus) {
     lines.push('💎 За каждого друга, оплатившего подписку, вы получите +14 дней к своей подписке.');
-    lines.push('Друзья получают скидку 20% на первый месяц.');
+    lines.push('Друзья получают скидку 20% на первую оплату (месяц или год).');
   } else {
     lines.push('⚠️ Бонусные дни начисляются только при активной платной подписке.');
     lines.push('Оформите подписку, чтобы получать +14 дней за каждого друга.');
-    lines.push('Друзья получат скидку 20% на первый месяц в любом случае.');
+    lines.push('Друзья получат скидку 20% на первую оплату в любом случае.');
   }
 
   await ctx.reply(lines.join('\n'));
