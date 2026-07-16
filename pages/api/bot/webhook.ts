@@ -214,21 +214,24 @@ function buildContext(update: Update): any {
   };
 }
 
-const EXPECTED_PRICES: Record<string, { month: number; annual: number; monthWithReferral: number }> = {
+const EXPECTED_PRICES: Record<string, { month: number; annual: number; monthWithReferral: number; annualWithReferral: number }> = {
   START: {
     month: 99_000,
     annual: Math.round(99_000 * 12 * 0.8),
     monthWithReferral: Math.round(99_000 * 0.8),
+    annualWithReferral: Math.round(Math.round(99_000 * 12 * 0.8) * 0.8),
   },
   PRO: {
     month: 199_000,
     annual: Math.round(199_000 * 12 * 0.8),
     monthWithReferral: Math.round(199_000 * 0.8),
+    annualWithReferral: Math.round(Math.round(199_000 * 12 * 0.8) * 0.8),
   },
   BUSINESS: {
     month: 499_000,
     annual: Math.round(499_000 * 12 * 0.8),
     monthWithReferral: Math.round(499_000 * 0.8),
+    annualWithReferral: Math.round(Math.round(499_000 * 12 * 0.8) * 0.8),
   },
 };
 
@@ -246,7 +249,7 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
 
     if (payload.startsWith('addon_export_')) {
       const user = await findUserByTelegramId(telegramId);
-      if (!user || user.tariff !== 'PRO' || user.export_addon_active) {
+      if (!user || (user.tariff !== 'PRO' && user.tariff !== 'START') || user.export_addon_active) {
         await ctx.answerPreCheckoutQuery({
           pre_checkout_query_id: pq.id,
           ok: false,
@@ -266,7 +269,7 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
       const prices = EXPECTED_PRICES[tariffKey];
       if (prices) {
         const expectedAmount = days === 365 ? prices.annual : prices.month;
-        const expectedWithReferral = days === 30 ? prices.monthWithReferral : null;
+        const expectedWithReferral = days === 30 ? prices.monthWithReferral : prices.annualWithReferral;
         const isValidAmount =
           pq.total_amount === expectedAmount ||
           (expectedWithReferral !== null && pq.total_amount === expectedWithReferral);
@@ -298,7 +301,7 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
         if (existing) return;
 
         const user = await findUserByTelegramId(telegramId);
-        if (user && user.tariff === 'PRO') {
+        if (user && (user.tariff === 'PRO' || user.tariff === 'START')) {
           await updateUser(user.id, { export_addon_active: true });
           await createBillingTransaction({
             user_id: user.id,
@@ -333,7 +336,7 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
 
       const prices = EXPECTED_PRICES[tariffKey];
       const expectedAmount = days === 365 ? prices.annual : prices.month;
-      const expectedWithReferral = days === 30 ? prices.monthWithReferral : null;
+      const expectedWithReferral = days === 30 ? prices.monthWithReferral : prices.annualWithReferral;
       const isValidAmount =
         sp.total_amount === expectedAmount ||
         (expectedWithReferral !== null && sp.total_amount === expectedWithReferral);
