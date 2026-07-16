@@ -6,6 +6,7 @@
   "framework": "nextjs",
   "crons": [
     { "path": "/api/jobs/daily", "schedule": "0 6 * * *" },
-    { "path": "/api/jobs/weekly", "schedule": "0 6 * * 2" }
+    { "path": "/api/jobs/weekly", "schedule": "0 6 * * 2" },
+    { "path": "/api/jobs/annual_upgrade", "schedule": "0 7 * * 4" }
   ]
 }
