@@ -36,8 +36,16 @@ export async function buildXlsxForRun(runId: string): Promise<Buffer> {
 
   const wb = XLSX.utils.book_new();
 
-  // Лист 1: Сводка
+  // Лист 1: Сводка (с пояснительной шапкой для бухгалтера)
   const summaryData: (string | number)[][] = [
+    ['СВЕРКА ВЫПЛАТ WILDBERRIES'],
+    [''],
+    ['Этот файл сформирован ботом SverkaBot и содержит результат сверки еженедельного отчёта WB с банковской выпиской.'],
+    ['Лист «Сводка» — ключевые цифры: сколько ожидалось, сколько поступило, размер расхождения.'],
+    ['Лист «WB» — перечень всех начислений и удержаний из отчёта Wildberries за период.'],
+    ['Лист «Банк» — все операции из банковской выписки с пометкой, какие из них являются выплатами WB.'],
+    ['Если сумма в строке «Разница» выделена зелёным — поступило больше ожидаемого. Красным — недоплата.'],
+    [''],
     ['ID сверки', agg.runId],
     ['Дата сверки', fmtDate(agg.createdAt)],
     ['Кабинет WB', agg.cabinetName ?? '—'],
@@ -51,13 +59,13 @@ export async function buildXlsxForRun(runId: string): Promise<Buffer> {
     ['Всего банковских операций в выписке', agg.bankTxs.length],
   ];
   const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
-  // Применяем числовой формат для денежных строк (строки 5,6,7 в колонке B)
-  for (const row of [5, 6]) {
+  // Применяем числовой формат для денежных строк (строки 13,14 в колонке B) и строки 15 (Разница)
+  const rowOffset = 8; // первые 8 строк — пояснения
+  for (const row of [rowOffset + 5, rowOffset + 6]) {
     const cell = wsSummary[`B${row}`];
     if (cell && cell.t === 'n') cell.z = RUB_FMT;
   }
-  // Строка 7 — Разница: двухцветный формат
-  const diffCell = wsSummary[`B7`];
+  const diffCell = wsSummary[`B${rowOffset + 7}`];
   if (diffCell && diffCell.t === 'n') diffCell.z = DIFF_FMT;
   XLSX.utils.book_append_sheet(wb, wsSummary, 'Сводка');
 
