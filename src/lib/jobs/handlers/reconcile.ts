@@ -63,7 +63,7 @@ async function getWbDeductionsByCategory(wbImportId: string): Promise<Record<str
   const rows = await db
     .select({
       category: canonical_transactions.category,
-      total: sql<bigint>`COALESCE(SUM(${canonical_transactions.amount_kopeks}), 0)`.mapWith(Number),
+      total: sql<bigint>`COALESCE(SUM(${canonical_transactions.amount_kopeks}), 0)`.mapWith((v: string) => BigInt(v)),
     })
     .from(canonical_transactions)
     .where(
@@ -77,7 +77,7 @@ async function getWbDeductionsByCategory(wbImportId: string): Promise<Record<str
   const map: Record<string, bigint> = {};
   for (const row of rows) {
     const cat = row.category || 'OTHER';
-    map[cat] = (map[cat] || BigInt(0)) + BigInt(row.total);
+    map[cat] = (map[cat] || BigInt(0)) + row.total;
   }
   return map;
 }
