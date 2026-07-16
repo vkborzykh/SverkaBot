@@ -6,8 +6,13 @@ import { findCabinetsByUserId, findCabinetById } from '@/src/db/repositories/wb-
 import { hasProFeatures } from '@/src/lib/billing/tariffs';
 import { getRunAggregates, formatRub } from '@/src/lib/reports/runAggregates';
 
+function monthLabel(date: Date): string {
+  const m = (date.getMonth() + 1).toString().padStart(2, '0');
+  const y = date.getFullYear().toString();
+  return `${m}.${y}`;
+}
+
 export async function GET(req: NextRequest) {
-  // Извлекаем initData из заголовка Authorization: tma <initData>
   const authHeader = req.headers.get('authorization') ?? '';
   const initData = authHeader.startsWith('tma ') ? authHeader.slice(4) : '';
   if (!initData) {
@@ -32,16 +37,13 @@ export async function GET(req: NextRequest) {
   const isPro = hasProFeatures(user.tariff, user.subscription_status, user.trial_expires_at);
   const hasActiveSubscription = user.subscription_status === 'ACTIVE' || user.subscription_status === 'TRIAL';
 
-  // Если нет Pro-доступа и нет активной подписки – отказ
   if (!isPro && !hasActiveSubscription) {
     return NextResponse.json({ error: 'Upgrade to PRO or BUSINESS to access statistics' }, { status: 403 });
   }
 
-  // Получаем данные для графика (последние 12 сверок для Pro, 2 для preview)
   const runs = await findRunsByUserId(user.id, 200);
   const completed = runs.filter(r => r.status === 'COMPLETED');
 
-  // Если передан фильтр по кабинету, проверяем владение и фильтруем
   const cabinetId = req.nextUrl.searchParams.get('cabinet_id');
   let filtered = completed;
   if (cabinetId) {
@@ -59,7 +61,6 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Сортировка по дате
   const sorted = [...filtered]
     .sort((a, b) => {
       const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
@@ -67,7 +68,6 @@ export async function GET(req: NextRequest) {
       return ta - tb;
     });
 
-  // Определяем, сколько точек отдавать: для предпросмотра – 2, иначе 12
   const maxPoints = isPro ? 12 : 2;
   const slice = sorted.slice(-maxPoints);
 
@@ -81,8 +81,17 @@ export async function GET(req: NextRequest) {
     loss: slice.map(r => Number(r.loss_kopeks ?? 0) / 100),
   };
 
-  // ── Текстовая сводка ──────────────────────────────────────────────────────
-  const summaryRuns = isPro ? filtered : slice; // для сводки используем все отфильтрованные либо ограниченные
+  // Drill-down: к каждой точке основного графика привязываем runId
+  const drill = slice.map(r => ({
+    runId: r.id,
+    label: r.created_at ? `${new Date(r.created_at).toLocaleDateString('ru-RU')}` : '?',
+    lossPercent: r.turnover_kopeks && Number(r.turnover_kopeks) > 0
+      ? Math.round((Number(r.loss_kopeks ?? 0) / Number(r.turnover_kopeks)) * 10000) / 100
+      : 0,
+  }));
+
+  // ── Сводка ──
+  const summaryRuns = isPro ? filtered : slice;
   const totalRuns = summaryRuns.length;
   const totalExpected = summaryRuns.reduce((sum, r) => sum + Number(r.turnover_kopeks ?? 0), 0) / 100;
   const totalReceived = summaryRuns.reduce((sum, r) => sum + (Number(r.turnover_kopeks ?? 0) - Number(r.loss_kopeks ?? 0)), 0) / 100;
@@ -97,16 +106,14 @@ export async function GET(req: NextRequest) {
     avgLossPercent: Math.round(avgLossPercent * 100) / 100,
   };
 
-  // ── Список кабинетов ──────────────────────────────────────────────────────
   const cabinets = await findCabinetsByUserId(user.id);
   const cabinetList = cabinets.map(c => ({ id: c.id, name: c.name }));
 
-  // ── Разбивка по кабинетам (только для Pro/Business при by_cabinet=true) ──
+  // ── Разбивка по кабинетам (by_cabinet=true) ──
   const byCabinetParam = req.nextUrl.searchParams.get('by_cabinet');
   let cabinetChart: any = undefined;
 
   if (isPro && byCabinetParam === 'true' && cabinets.length > 1) {
-    // Берём последние 12 run'ов пользователя (без фильтра по кабинету) для единой оси X
     const sortedAll = [...completed]
       .sort((a, b) => {
         const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
@@ -120,22 +127,19 @@ export async function GET(req: NextRequest) {
       return `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}`;
     });
 
-    // Получаем cabinet_id для каждого run через импорт
     const { findImportById } = await import('@/src/db/repositories/imports');
-    const runCabinetMap = new Map<string, string>(); // runId -> cabinetId
+    const runCabinetMap = new Map<string, string>();
     for (const run of sortedAll) {
       const wbImport = await findImportById(run.wb_import_id);
       const cabId = (wbImport as any)?.cabinet_id || null;
       if (cabId) runCabinetMap.set(run.id, cabId);
     }
 
-    // Формируем массивы для каждого кабинета
     const cabinetDatasets: any[] = [];
     for (const cab of cabinets) {
       const expected: number[] = [];
       const received: number[] = [];
       const loss: number[] = [];
-
       for (const run of sortedAll) {
         const runCab = runCabinetMap.get(run.id);
         if (runCab === cab.id) {
@@ -148,18 +152,35 @@ export async function GET(req: NextRequest) {
           loss.push(0);
         }
       }
-
-      cabinetDatasets.push({
-        cabinetName: cab.name,
-        expected,
-        received,
-        loss,
-      });
+      cabinetDatasets.push({ cabinetName: cab.name, expected, received, loss });
     }
 
-    cabinetChart = {
-      labels,
-      datasets: cabinetDatasets,
+    cabinetChart = { labels, datasets: cabinetDatasets };
+  }
+
+  // ── Тренд по месяцам (только для Pro) ──
+  let monthlyTrend: any = undefined;
+  if (isPro) {
+    const monthMap = new Map<string, { expected: number; received: number; loss: number; count: number }>();
+    for (const run of filtered) {
+      if (!run.created_at) continue;
+      const key = monthLabel(new Date(run.created_at));
+      const entry = monthMap.get(key) || { expected: 0, received: 0, loss: 0, count: 0 };
+      entry.expected += Number(run.turnover_kopeks ?? 0) / 100;
+      entry.received += (Number(run.turnover_kopeks ?? 0) - Number(run.loss_kopeks ?? 0)) / 100;
+      entry.loss += Number(run.loss_kopeks ?? 0) / 100;
+      entry.count += 1;
+      monthMap.set(key, entry);
+    }
+    const months = Array.from(monthMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .slice(-12);
+    monthlyTrend = {
+      labels: months.map(([key]) => key),
+      expected: months.map(([, v]) => v.expected),
+      received: months.map(([, v]) => v.received),
+      loss: months.map(([, v]) => v.loss),
+      lossPercent: months.map(([, v]) => (v.expected > 0 ? Math.round((v.loss / v.expected) * 10000) / 100 : 0)),
     };
   }
 
@@ -167,12 +188,12 @@ export async function GET(req: NextRequest) {
     ok: true,
     preview: !isPro && hasActiveSubscription,
     chart: chartData,
+    drill,
     summary,
     cabinets: cabinetList,
     cabinetChart,
+    monthlyTrend,
   }, {
-    headers: {
-      'Cache-Control': 'no-store',
-    },
+    headers: { 'Cache-Control': 'no-store' },
   });
 }
