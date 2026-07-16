@@ -204,7 +204,7 @@ async function runRowLevelShadow(
     const duration = Date.now() - start;
     const agg = {
       status: aggregateResult.status,
-      lossKopeks: String(aggregResult.discrepancyKopeks),
+      lossKopeks: String(aggregateResult.discrepancyKopeks),
       matchRate: aggregateResult.matchRate,
     };
     const row = {
