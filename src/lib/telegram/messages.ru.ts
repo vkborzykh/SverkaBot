@@ -88,6 +88,14 @@ export const msg = {
   tariffAlreadyActive: 'Этот тариф уже подключен.',
   chooseTariffPrompt: 'Выберите тариф:',
 
+  // ── Annual upgrade suggestion ───────────────────────────────────────────────
+  annualUpgradeSuggestion: (tariff: string, monthPrice: number, annualPrice: number, economy: number): string => {
+    const monthPriceRub = Math.round(monthPrice / 100);
+    const annualPriceRub = Math.round(annualPrice / 100);
+    const economyRub = Math.round(economy / 100);
+    return `💡 Вы пользуетесь подпиской больше месяца. Почему бы не сэкономить?\nПереходите на годовой тариф и платите меньше: ${annualPriceRub} ₽ в год вместо ${monthPriceRub} ₽ в месяц (экономия ${economyRub} ₽).\nОформить: /subscribe`;
+  },
+
   // ── Sync status command ─────────────────────────────────────────────────────
   syncStatusMissingId: 'Укажите ID сверки: /sync_status <id>',
   syncStatusNotFound: 'Сверка не найдена или не принадлежит вашему аккаунту.',
