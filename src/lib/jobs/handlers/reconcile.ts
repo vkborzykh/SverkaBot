@@ -10,14 +10,20 @@ import { getDb } from '@/src/db';
 import { reconciliation_runs } from '@/src/db/schema';
 import { eq, and, gte, lte } from 'drizzle-orm';
 
-async function notifyUser(telegramId: bigint, text: string): Promise<void> {
+const MINIAPP_URL = process.env.MINIAPP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}/miniapp/stats.html` : '');
+
+async function notifyUser(telegramId: bigint, text: string, replyMarkup?: any): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return;
   try {
+    const body: any = { chat_id: String(telegramId), text };
+    if (replyMarkup) {
+      body.reply_markup = replyMarkup;
+    }
     await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: String(telegramId), text }),
+      body: JSON.stringify(body),
     });
   } catch (err) {
     console.error('[notifyUser] error:', err);
@@ -199,16 +205,26 @@ export async function handleReconcile(job: Job): Promise<void> {
         );
 
         const streak = await getStreak(user.id);
-        if (streak > 1 && result.status === 'reconciled') {
-          await notifyUser(
-            user.telegram_id,
-            `✅ Уже ${pluralizeSverka(streak)} подряд без невыясненных сумм!`,
-          );
-        }
+        const streakMsg = streak > 1 && result.status === 'reconciled'
+          ? `✅ Уже ${pluralizeSverka(streak)} подряд без невыясненных сумм!`
+          : null;
 
         const anomalyMsg = await checkAnomaly(user.id, lossKopeks);
+
+        const webAppButton = MINIAPP_URL
+          ? [{ text: '📈 Открыть статистику', web_app: { url: MINIAPP_URL } }]
+          : null;
+
+        // Отправляем сообщение о стрике с кнопкой мини-аппа, если есть стрик
+        if (streakMsg) {
+          const markup = webAppButton ? { inline_keyboard: [webAppButton] } : undefined;
+          await notifyUser(user.telegram_id, streakMsg, markup);
+        }
+
+        // Отправляем сообщение об аномалии с кнопкой мини-аппа
         if (anomalyMsg) {
-          await notifyUser(user.telegram_id, anomalyMsg);
+          const markup = webAppButton ? { inline_keyboard: [webAppButton] } : undefined;
+          await notifyUser(user.telegram_id, anomalyMsg, markup);
         }
 
         // Контекстный апсейл для Старта при недоплате
