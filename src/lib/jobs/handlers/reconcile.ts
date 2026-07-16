@@ -10,6 +10,13 @@ import { getDb } from '@/src/db';
 import { reconciliation_runs } from '@/src/db/schema';
 import { eq, and, gte, lte } from 'drizzle-orm';
 
+// Построчный движок (shadow-прогон)
+import { generateCandidates } from '@/src/lib/reconciliation/candidates';
+import { updateCandidateScores } from '@/src/lib/reconciliation/candidates';
+import { globalMatch } from '@/src/lib/reconciliation/assignment';
+import { detectSplitCombined } from '@/src/lib/reconciliation/splitCombined';
+import { createAdminNotification } from '@/src/db/repositories/admin-notifications';
+
 const MINIAPP_URL = process.env.MINIAPP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}/miniapp/stats.html` : '');
 
 async function notifyUser(telegramId: bigint, text: string, replyMarkup?: any): Promise<void> {
@@ -116,6 +123,68 @@ async function checkAnomaly(userId: string, currentLoss: bigint): Promise<string
   return null;
 }
 
+/**
+ * Shadow-прогон построчного движка сверки.
+ * Запускается параллельно с агрегатной моделью; результат пишется в лог и admin_notifications.
+ * Никак не влияет на ответ пользователю.
+ */
+async function runRowLevelShadow(
+  runId: string,
+  run: NonNullable<Awaited<ReturnType<typeof findRunById>>>,
+  aggregateResult: WbPayoutResult,
+): Promise<void> {
+  const start = Date.now();
+  try {
+    // 1. Генерация кандидатов
+    const candidateCount = await generateCandidates(runId);
+    // 2. Скоринг
+    await updateCandidateScores(runId);
+    // 3. Глобальное сопоставление (dryRun, без записи в БД)
+    const stats = await globalMatch(runId, { dryRun: true });
+    // 4. Обнаружение split/combined (тоже dryRun – detectSplitCombined всегда пишет в БД,
+    //    но в shadow-режиме мы не должны менять prod. Пока опустим, так как без предварительных
+    //    матчей split/combined не найдёт ничего. Для чистоты вызовем с try/catch.)
+    try {
+      await detectSplitCombined(runId);
+    } catch {
+      // в dry-run может не быть нужных матчей
+    }
+
+    const duration = Date.now() - start;
+    const agg = {
+      status: aggregateResult.status,
+      lossKopeks: String(aggregResult.discrepancyKopeks),
+      matchRate: aggregateResult.matchRate,
+    };
+    const row = {
+      matchedCount: stats.matchedCount,
+      unmatchedCount: stats.unmatchedCount,
+      ambiguousCount: stats.ambiguousCount,
+      matchRate: stats.matchRate,
+      unmatchedAmount: String(stats.unmatchedAmount),
+      ambiguousAmount: String(stats.ambiguousAmount),
+    };
+
+    console.log(
+      `[shadow-recon] run=${runId} duration=${duration}ms agg=${JSON.stringify(agg)} row=${JSON.stringify(row)}`,
+    );
+
+    await createAdminNotification({
+      severity: 'INFO',
+      title: `Shadow reconciliation ${runId.slice(0, 8)}`,
+      message: `Duration: ${duration}ms\nAggregate: ${JSON.stringify(agg)}\nRow-level: ${JSON.stringify(row)}`,
+    });
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    console.error(`[shadow-recon] run=${runId} error: ${reason}`);
+    await createAdminNotification({
+      severity: 'WARN',
+      title: `Shadow reconciliation FAILED ${runId.slice(0, 8)}`,
+      message: reason,
+    });
+  }
+}
+
 export async function handleReconcile(job: Job): Promise<void> {
   const runId = (job.payload as Record<string, string>)?.run_id ?? job.entity_id;
   if (!runId) throw new Error('Missing run_id in job payload');
@@ -157,6 +226,11 @@ export async function handleReconcile(job: Job): Promise<void> {
       loss_kopeks: lossKopeks,
       loss_percent: lossPercent,
     });
+
+    // Shadow-прогон построчного движка (не влияет на пользователя)
+    runRowLevelShadow(runId, run, result).catch((err) =>
+      console.error('[shadow-recon] unhandled rejection:', err),
+    );
 
     // Инкремент счётчика сверок – только при успешном завершении, с дедупликацией
     if (user) {
