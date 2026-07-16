@@ -8,9 +8,6 @@ import { enqueue } from '@/src/lib/jobs/queue';
 import { startReconciliation } from '@/src/lib/reconciliation/startRun';
 import { monthlyLimitFor } from '@/src/lib/billing/tariffs';
 import { findCabinetsByUserId, findCabinetById, createCabinet } from '@/src/db/repositories/wb-cabinets';
-import { getDb } from '@/src/db';
-import { reconciliation_runs } from '@/src/db/schema';
-import { eq, and, gte, lte } from 'drizzle-orm';
 
 function paywallReply(ctx: Context, text: string) {
   return ctx.reply(text, {
@@ -200,39 +197,8 @@ export async function handleRunSyncInline(ctx: Context): Promise<void> {
       return;
     }
     await enqueue('reconcile', result.run_id, { run_id: result.run_id });
-
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-
-    const db = getDb();
-    const existingCompleted = await db
-      .select({ id: reconciliation_runs.id })
-      .from(reconciliation_runs)
-      .where(
-        and(
-          eq(reconciliation_runs.user_id, user.id),
-          eq(reconciliation_runs.wb_import_id, wbImportId),
-          eq(reconciliation_runs.bank_import_id, bankImportId),
-          eq(reconciliation_runs.status, 'COMPLETED'),
-          gte(reconciliation_runs.created_at, startOfMonth),
-          lte(reconciliation_runs.created_at, endOfMonth)
-        )
-      )
-      .limit(1);
-
-    if (existingCompleted.length === 0) {
-      await updateUser(user.id, { monthly_reconciliations: used + 1 });
-    }
-
-    const currentUsed = existingCompleted.length === 0 ? used + 1 : used;
-    const remaining = limit !== null ? limit - currentUsed : null;
-
-    if (remaining !== null && remaining >= 0) {
-      await ctx.reply(`✅ Сверка запущена. Осталось ${remaining} из ${limit} сверок.`);
-    } else {
-      await ctx.reply(msg.syncStarted);
-    }
+    // Счётчик сверок будет увеличен в обработчике задачи после успешного завершения
+    await ctx.reply('✅ Сверка запущена. Ожидайте результат.');
   } catch (err) {
     console.error('[runSyncInline] error:', err);
     await ctx.reply('Произошла ошибка при запуске сверки.');
