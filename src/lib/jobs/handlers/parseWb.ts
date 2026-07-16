@@ -18,7 +18,7 @@ import { sha256 } from '@/src/lib/ingestion/hash';
 import { msg } from '@/src/lib/telegram/messages.ru';
 import { wbCompletedKeyboard, replaceWbInlineKeyboard } from '@/src/lib/telegram/keyboard';
 
-const PARSER_VERSION = 'wb_v1';
+const PARSER_VERSION = 'wb_v2';
 const ROW_LIMIT = 50_000;
 const INSERT_CHUNK = 2000;
 
@@ -67,6 +67,26 @@ const AMOUNT_PRIORITY = [
   'сумма к выплате',
 ];
 
+// Приоритет колонок для классификации типа операции
+const CATEGORY_PRIORITY = [
+  'вид операции',
+  'тип начисления',
+  'наименование услуги',
+  'основание',
+  'тип',
+  'категория',
+];
+
+// Карта ключевых слов для выделения удержаний в отдельные транзакции
+const DEDUCTION_COLUMNS = [
+  { keywords: ['логистик', 'logistic', 'доставк', 'delivery'], category: 'LOGISTICS' },
+  { keywords: ['хранение', 'хранен', 'storage', 'склад'], category: 'STORAGE' },
+  { keywords: ['штраф', 'penalty', 'неустойк', 'fine'], category: 'PENALTY' },
+  { keywords: ['возврат', 'refund', 'отмен'], category: 'REFUND' },
+  { keywords: ['комисси', 'commission', 'вознагражд'], category: 'COMMISSION' },
+  { keywords: ['реклам', 'продвижен', 'маркетинг', 'advert'], category: 'MARKETING' },
+];
+
 function pickByPriority(lower: string[], priorities: string[]): number {
   for (const kw of priorities) {
     const idx = lower.findIndex((h) => h.includes(kw));
@@ -78,9 +98,11 @@ function pickByPriority(lower: string[], priorities: string[]): number {
 interface ColumnMap {
   dateCol: number;
   amountCol: number;
+  categoryCol: number | null;
   referenceCol: number | null;
   descriptionCol: number | null;
   counterpartyCol: number | null;
+  deductionCols: { index: number; category: string }[];
 }
 
 function detectColumns(headers: unknown[]): ColumnMap {
@@ -90,6 +112,8 @@ function detectColumns(headers: unknown[]): ColumnMap {
   if (dateCol === -1 || amountCol === -1) {
     throw new Error(`Required columns not found. Headers: ${lower.join(', ')}`);
   }
+
+  const categoryCol = pickByPriority(lower, CATEGORY_PRIORITY);
   const referenceCol = lower.findIndex(
     (h) => h.includes('номер поставки') || h.includes('srid') || h.includes('номер'),
   );
@@ -99,13 +123,42 @@ function detectColumns(headers: unknown[]): ColumnMap {
   const counterpartyCol = lower.findIndex(
     (h) => h.includes('партн') || h.includes('контрагент') || h.includes('получатель'),
   );
+
+  const deductionCols: { index: number; category: string }[] = [];
+  for (const dc of DEDUCTION_COLUMNS) {
+    for (const kw of dc.keywords) {
+      const idx = lower.findIndex((h) => h.includes(kw));
+      if (idx !== -1 && idx !== dateCol && idx !== amountCol) {
+        deductionCols.push({ index: idx, category: dc.category });
+        break;
+      }
+    }
+  }
+
   return {
     dateCol,
     amountCol,
+    categoryCol: categoryCol === -1 ? null : categoryCol,
     referenceCol: referenceCol === -1 ? null : referenceCol,
     descriptionCol: descriptionCol === -1 ? null : descriptionCol,
     counterpartyCol: counterpartyCol === -1 ? null : counterpartyCol,
+    deductionCols,
   };
+}
+
+function classifyWbRow(cellValue: unknown, payoutDirection: 'IN' | 'OUT'): string {
+  const text = normalizeText(String(cellValue ?? ''));
+  if (payoutDirection === 'OUT') return 'REFUND';
+  if (!text) return 'SALE';
+  const lower = text.toLowerCase();
+  if (['возврат', 'refund', 'отмена'].some(k => lower.includes(k))) return 'REFUND';
+  if (['логистик', 'logistic', 'доставк', 'delivery'].some(k => lower.includes(k))) return 'LOGISTICS';
+  if (['хранен', 'storage', 'склад'].some(k => lower.includes(k))) return 'STORAGE';
+  if (['штраф', 'penalty', 'неустойк', 'fine'].some(k => lower.includes(k))) return 'PENALTY';
+  if (['комисси', 'commission', 'вознагражд'].some(k => lower.includes(k))) return 'COMMISSION';
+  if (['реклам', 'продвижен', 'маркетинг', 'advert'].some(k => lower.includes(k))) return 'MARKETING';
+  if (['продаж', 'реализац', 'sale'].some(k => lower.includes(k))) return 'SALE';
+  return 'OTHER';
 }
 
 export async function handleParseWb(job: Job): Promise<void> {
@@ -242,6 +295,23 @@ export async function handleParseWb(job: Job): Promise<void> {
         continue;
       }
     }
+
+    // Добавляем транзакции удержаний из специализированных колонок
+    for (const dcol of colMap.deductionCols) {
+      const rawVal = row[dcol.index];
+      if (rawVal !== null && rawVal !== undefined && String(rawVal).trim() !== '') {
+        try {
+          const amt = normalizeAmount(rawVal);
+          // Удержания обычно положительные в отчёте, но мы трактуем их как OUT
+          if (amt > BigInt(0)) {
+            components.push({ amount: amt, direction: 'OUT', kind: dcol.category.toLowerCase() });
+          }
+        } catch (e) {
+          // Не критично, просто пропускаем
+        }
+      }
+    }
+
     if (components.length === 0) {
       processedRows++;
       continue;
@@ -252,7 +322,23 @@ export async function handleParseWb(job: Job): Promise<void> {
     const counterparty = colMap.counterpartyCol !== null ? normalizeDisplayText(row[colMap.counterpartyCol]) : null;
     const rawPayload = JSON.parse(JSON.stringify(row).slice(0, 4000)) as unknown;
 
+    // Определяем базовую категорию из специальной колонки, если есть
+    const categoryFromCol = colMap.categoryCol !== null
+      ? classifyWbRow(row[colMap.categoryCol], 'IN')
+      : undefined;
+
     for (const c of components) {
+      let category = categoryFromCol;
+      if (!category) {
+        category = classifyWbRow(null, c.direction);
+      }
+      // Уточняем категорию для удержаний, если есть kind
+      if (c.kind && c.direction === 'OUT') {
+        category = c.kind.toUpperCase(); // kind уже содержит категорию из deductionCols
+      } else if (c.direction === 'OUT' && category !== 'REFUND') {
+        category = 'DEDUCTION'; // fallback
+      }
+
       const rowHash = sha256(Buffer.from(JSON.stringify({ importId, rowNumber, kind: c.kind, direction: c.direction, txDate: txDate.toISOString(), amount: String(c.amount) })));
       transactions.push({
         import_id: importId,
@@ -266,6 +352,7 @@ export async function handleParseWb(job: Job): Promise<void> {
         reference,
         description: c.kind === 'payout' || c.kind === 'возврат' ? description : `${description ?? ''} [${c.kind}]`.trim(),
         counterparty,
+        category,
         row_hash: rowHash,
         raw_payload: c.kind === 'payout' ? rawPayload : null,
       });
