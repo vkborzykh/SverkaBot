@@ -8,7 +8,7 @@ import { clearSession } from '@/src/lib/telegram/session';
 import { hasProFeatures, hasBusinessFeatures, monthlyLimitFor } from '@/src/lib/billing/tariffs';
 import { getDb } from '@/src/db';
 import { reconciliation_runs, canonical_transactions } from '@/src/db/schema';
-import { eq, and, gte, lte, sql } from 'drizzle-orm';
+import { eq, and, gte, lte, sql, ne } from 'drizzle-orm';
 
 // Построчный движок (shadow-прогон)
 import { generateCandidates } from '@/src/lib/reconciliation/candidates';
@@ -177,7 +177,6 @@ async function predictLoss(userId: string, currentLoss: bigint): Promise<string 
 
   if (historical.length < 3) return null;
 
-  // Добавляем текущую сверку в конец массива
   const points: { x: number; y: number }[] = historical.map((r, i) => ({
     x: i + 1,
     y: Number(r.loss_kopeks) / 100,
@@ -195,7 +194,7 @@ async function predictLoss(userId: string, currentLoss: bigint): Promise<string 
 
   const slope = (n * sumXY - sumX * sumY) / denominator;
 
-  if (slope <= 0) return null; // тренд не растёт
+  if (slope <= 0) return null;
 
   const nextPeriod = points.length + 1;
   const forecast = Math.round((sumY / n + slope * (nextPeriod - sumX / n)) * 100) / 100;
@@ -351,6 +350,7 @@ export async function handleReconcile(job: Job): Promise<void> {
             eq(reconciliation_runs.wb_import_id, run.wb_import_id),
             eq(reconciliation_runs.bank_import_id, run.bank_import_id),
             eq(reconciliation_runs.status, 'COMPLETED'),
+            ne(reconciliation_runs.id, runId), // исключаем текущий run из проверки
             gte(reconciliation_runs.created_at, startOfMonth),
             lte(reconciliation_runs.created_at, endOfMonth)
           )
