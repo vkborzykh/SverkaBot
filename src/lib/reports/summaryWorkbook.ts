@@ -1,5 +1,3 @@
-// src/lib/reports/summaryWorkbook.ts
-
 // Эта версия отдаёт ОДИН XLSX с тремя листами:
 //   1. "Итого"        — суммарные цифры по всем кабинетам за период.
 //   2. "По кабинетам"  — одна строка НА КАБИНЕТ (не на run), отсортировано
@@ -108,10 +106,6 @@ export async function buildSummaryWorkbook(runIds: string[]): Promise<SummaryWor
   const wb = XLSX.utils.book_new();
 
   // --- Лист 1: "Итого" ---
-  // Смешанный лист (текст, счётчики и деньги вместе), поэтому денежные ячейки
-  // форматируем точечно (по аналогии с "Сводка" в exportXlsx.ts), а не через
-  // applyRubNumberFormat по всей колонке — иначе счётчики кабинетов/сверок
-  // тоже получили бы денежный формат с двумя знаками после запятой.
   const summaryRows: (string | number)[][] = [
     ['Сводный отчёт SverkaBot'],
     [],
@@ -123,10 +117,10 @@ export async function buildSummaryWorkbook(runIds: string[]): Promise<SummaryWor
     ['Получено на счёт (всего)', toRubNumber(totalReceivedKopeks)],
     ['Разница (недоплата, если > 0)', toRubNumber(totalDiffKopeks)],
     [],
-    ['Кабинетов «Совпало»', matchedCabinets],
-    ['Кабинетов «Недоплата»', underpaidCabinets],
-    ['Кабинетов «Переплата»', overpaidCabinets],
-    ['Кабинетов «Требует проверки»', needsReviewCabinets],
+    ['Совпало', matchedCabinets],
+    ['Недоплата', underpaidCabinets],
+    ['Переплата', overpaidCabinets],
+    ['Требует проверки', needsReviewCabinets],
   ];
   const summaryWs = XLSX.utils.aoa_to_sheet(summaryRows);
   summaryWs['!cols'] = [{ wch: 34 }, { wch: 18 }];
