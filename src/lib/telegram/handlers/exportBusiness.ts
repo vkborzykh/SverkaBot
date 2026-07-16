@@ -104,16 +104,26 @@ export async function handleExportCommand(ctx: Context): Promise<void> {
     await ctx.reply(msg.exportMissingId);
     return;
   }
-  // Показываем выбор формата
+
+  const user = await findUserByTelegramId(BigInt(ctx.from!.id));
+  const showSummary = user && hasExportAccess(user);
+
+  // Показываем выбор формата, добавляем кнопку сводного отчёта, если есть доступ
+  const keyboard: { text: string; callback_data: string }[][] = [
+    [
+      { text: msg.exportCsvButton, callback_data: `export_csv:${runId}` },
+      { text: msg.exportXlsxButton, callback_data: `export_xlsx:${runId}` },
+      { text: msg.export1cButton, callback_data: `export_1c:${runId}` },
+    ],
+  ];
+
+  if (showSummary) {
+    keyboard.push([
+      { text: '📋 Сводный отчёт (все кабинеты)', callback_data: 'summary_period_pick:all' },
+    ]);
+  }
+
   await ctx.reply(msg.exportChooseFormat, {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: '📊 CSV', callback_data: `export_csv:${runId}` },
-          { text: '📗 Excel', callback_data: `export_xlsx:${runId}` },
-          { text: '📁 Для 1С', callback_data: `export_1c:${runId}` },
-        ],
-      ],
-    },
+    reply_markup: { inline_keyboard: keyboard },
   });
 }
