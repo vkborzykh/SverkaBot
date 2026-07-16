@@ -158,6 +158,58 @@ function pluralizeSverka(count: number): string {
   return `${count} сверок`;
 }
 
+/** Линейная регрессия по истории недоплат. Возвращает прогноз на следующий период или null. */
+async function predictLoss(userId: string, currentLoss: bigint): Promise<string | null> {
+  const runs = await findRunsByUserId(userId, 100);
+  const historical = runs
+    .filter(
+      (r) =>
+        r.status === 'COMPLETED' &&
+        r.completed_at &&
+        r.loss_kopeks !== null &&
+        BigInt(r.loss_kopeks) > BigInt(0),
+    )
+    .sort((a, b) => {
+      const ta = a.completed_at ? new Date(a.completed_at).getTime() : 0;
+      const tb = b.completed_at ? new Date(b.completed_at).getTime() : 0;
+      return ta - tb;
+    });
+
+  if (historical.length < 3) return null;
+
+  // Добавляем текущую сверку в конец массива
+  const points: { x: number; y: number }[] = historical.map((r, i) => ({
+    x: i + 1,
+    y: Number(r.loss_kopeks) / 100,
+  }));
+  points.push({ x: points.length + 1, y: Number(currentLoss) / 100 });
+
+  const n = points.length;
+  const sumX = points.reduce((s, p) => s + p.x, 0);
+  const sumY = points.reduce((s, p) => s + p.y, 0);
+  const sumXY = points.reduce((s, p) => s + p.x * p.y, 0);
+  const sumX2 = points.reduce((s, p) => s + p.x * p.x, 0);
+
+  const denominator = n * sumX2 - sumX * sumX;
+  if (denominator === 0) return null;
+
+  const slope = (n * sumXY - sumX * sumY) / denominator;
+
+  if (slope <= 0) return null; // тренд не растёт
+
+  const nextPeriod = points.length + 1;
+  const forecast = Math.round((sumY / n + slope * (nextPeriod - sumX / n)) * 100) / 100;
+
+  const currentRub = Number(currentLoss) / 100;
+  const growth = currentRub > 0 ? Math.round((forecast - currentRub) / currentRub * 100) : 0;
+
+  if (forecast > currentRub * 1.1) {
+    return `📈 Прогноз: если тренд сохранится, в следующей сверке недоплата может составить ≈${forecast.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽ (рост ≈${growth}%).`;
+  }
+
+  return null;
+}
+
 /** Проверяет, не является ли текущее расхождение аномально большим по сравнению со средним за последние 3 месяца. */
 async function checkAnomaly(userId: string, currentLoss: bigint): Promise<string | null> {
   if (currentLoss <= BigInt(0)) return null;
@@ -337,6 +389,9 @@ export async function handleReconcile(job: Job): Promise<void> {
 
         const anomalyMsg = await checkAnomaly(user.id, lossKopeks);
 
+        // Прогноз недоплаты
+        const forecastMsg = await predictLoss(user.id, lossKopeks);
+
         const webAppButton = MINIAPP_URL
           ? [{ text: '📈 Открыть статистику', web_app: { url: MINIAPP_URL } }]
           : null;
@@ -351,6 +406,11 @@ export async function handleReconcile(job: Job): Promise<void> {
         if (anomalyMsg) {
           const markup = webAppButton ? { inline_keyboard: [webAppButton] } : undefined;
           await notifyUser(user.telegram_id, anomalyMsg, markup);
+        }
+
+        // Отправляем прогноз, если он есть
+        if (forecastMsg) {
+          await notifyUser(user.telegram_id, forecastMsg);
         }
 
         // Контекстный апсейл для Старта при недоплате
