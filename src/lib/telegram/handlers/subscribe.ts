@@ -5,24 +5,27 @@ import { msg } from '../messages.ru';
 import { EXPORT_ADDON_PRICE_KOPEKS, TARIFF_PRICES_KOPEKS } from '@/src/lib/billing/tariffs';
 import type { Tariff } from '@/src/lib/billing/tariffs';
 
-const TARIFFS: Record<Tariff, { priceKopeks: number; annualPriceKopeks: number; label: string; desc: string }> = {
+const TARIFFS: Record<Tariff, { priceKopeks: number; annualPriceKopeks: number; label: string; descMonth: string; descYear: string }> = {
   START: {
     priceKopeks: 99_000,
     annualPriceKopeks: Math.round(99_000 * 12 * 0.8),
     label: '🚀 Старт',
-    desc: '30 дней, до 8 сверок в месяц',
+    descMonth: '30 дней, до 8 сверок в месяц',
+    descYear: '365 дней, до 8 сверок каждый месяц',
   },
   PRO: {
     priceKopeks: 199_000,
     annualPriceKopeks: Math.round(199_000 * 12 * 0.8),
     label: '⚡ Профи',
-    desc: '30 дней, безлимит, Статистика, до 2 кабинетов',
+    descMonth: '30 дней, безлимит, Статистика, до 2 кабинетов',
+    descYear: '365 дней, безлимит, статистика, до 2 кабинетов',
   },
   BUSINESS: {
     priceKopeks: 499_000,
     annualPriceKopeks: Math.round(499_000 * 12 * 0.8),
     label: '💼 Бизнес',
-    desc: '30 дней, до 5 кабинетов, экспорт (CSV/XLSX/1С), хранение 365 дней',
+    descMonth: '30 дней, до 5 кабинетов, экспорт (CSV/XLSX/1С), хранение 365 дней',
+    descYear: '365 дней, статистика, до 5 кабинетов, экспорт (CSV/XLSX/1С), хранение в течение года',
   },
 };
 
@@ -73,18 +76,17 @@ export async function handleSubscribe(ctx: Context): Promise<void> {
 
   await ctx.reply(statusText);
 
-  // Кнопки выбора тарифа теперь показывают и месячную, и годовую цену
+  // Формируем кнопки с реальными годовыми ценами (скидка 20% от 12 месяцев)
   const keyboard: { text: string; callback_data: string }[][] = [
-    [{ text: `${TARIFFS.START.label} – 990 ₽/мес (≈7 920 ₽/год)`, callback_data: 'tariff_choice:START' }],
-    [{ text: `${TARIFFS.PRO.label} – 1 990 ₽/мес (≈15 920 ₽/год)`, callback_data: 'tariff_choice:PRO' }],
-    [{ text: `${TARIFFS.BUSINESS.label} – 4 990 ₽/мес (≈39 920 ₽/год)`, callback_data: 'tariff_choice:BUSINESS' }],
+    [{ text: `${TARIFFS.START.label} – 990 ₽/мес (${Math.round(TARIFFS.START.annualPriceKopeks / 100)} ₽/год)`, callback_data: 'tariff_choice:START' }],
+    [{ text: `${TARIFFS.PRO.label} – 1 990 ₽/мес (${Math.round(TARIFFS.PRO.annualPriceKopeks / 100)} ₽/год)`, callback_data: 'tariff_choice:PRO' }],
+    [{ text: `${TARIFFS.BUSINESS.label} – 4 990 ₽/мес (${Math.round(TARIFFS.BUSINESS.annualPriceKopeks / 100)} ₽/год)`, callback_data: 'tariff_choice:BUSINESS' }],
   ];
 
   if (user.tariff === 'PRO' && !user.export_addon_active) {
     keyboard.push([{ text: '🧩 Экспорт для бухгалтера – 590 ₽/мес', callback_data: 'tariff_export_addon' }]);
   }
 
-  // Показываем кнопку аддона и для Старта, если ещё не подключён
   if (user.tariff === 'START' && !user.export_addon_active) {
     keyboard.push([{ text: '🧩 Экспорт для бухгалтера – 590 ₽/мес', callback_data: 'tariff_export_addon' }]);
   }
@@ -151,11 +153,12 @@ async function sendInvoiceForPeriod(ctx: Context, userId: string, tariffKey: Tar
   }
 
   const periodLabel = days === 365 ? '(год)' : '(месяц)';
+  const desc = days === 365 ? t.descYear : t.descMonth;
   const payload = `${days === 365 ? 'annual_' : ''}sub_${userId}_${tariffKey}_${Date.now()}`;
 
   await ctx.replyWithInvoice({
     title: `Подписка SverkaBot – ${t.label} ${periodLabel}`,
-    description: t.desc,
+    description: desc,
     payload,
     provider_token: process.env.TELEGRAM_PROVIDER_TOKEN!,
     currency: 'RUB',
@@ -201,7 +204,6 @@ async function sendExportAddonInvoice(ctx: Context, userId: string) {
 export async function handleExportAddon(ctx: Context): Promise<void> {
   const user = await findUserByTelegramId(BigInt(ctx.from!.id));
   if (!user) return;
-  // Аддон теперь доступен на Старте и Профи
   if (user.tariff !== 'PRO' && user.tariff !== 'START') {
     await ctx.answerCbQuery('Аддон доступен на тарифах Старт и Профи', { show_alert: true });
     return;
@@ -227,7 +229,6 @@ export async function handleReferral(ctx: Context): Promise<void> {
   const link = `https://t.me/SverkaProBot?start=ref${BigInt(from.id)}`;
   const invitedUsers = await findUsersByInvitedBy(BigInt(from.id));
 
-  // Проверяем, активна ли у пользователя платная подписка для получения бонусов
   const canEarnBonus = user.subscription_status === 'ACTIVE';
 
   const lines = [
