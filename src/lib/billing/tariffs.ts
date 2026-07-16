@@ -48,7 +48,7 @@ export function hasBusinessFeatures(
   return tariff === 'BUSINESS';
 }
 
-/** Доступ к экспорту: BUSINESS или PRO с оплаченным аддоном.
+/** Доступ к экспорту: BUSINESS или (PRO / START) с оплаченным аддоном.
  *  Во время активного TRIAL экспорт также доступен. */
 export function hasExportAccess(
   user: { tariff?: string | null; export_addon_active?: boolean | null; subscription_status?: string | null; trial_expires_at?: Date | null } | null | undefined,
@@ -56,7 +56,7 @@ export function hasExportAccess(
   if (!user) return false;
   if (isTrialActive(user.subscription_status, user.trial_expires_at)) return true;
   if (user.tariff === 'BUSINESS') return true;
-  return user.tariff === 'PRO' && user.export_addon_active === true;
+  return (user.tariff === 'PRO' || user.tariff === 'START') && user.export_addon_active === true;
 }
 
 /** Месячный лимит сверок. null = безлимит. */
