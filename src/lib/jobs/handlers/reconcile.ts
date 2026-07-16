@@ -1,11 +1,14 @@
 import type { Job } from '@/src/db/repositories/jobs';
 import { findRunById, updateRun, findRunsByUserId } from '@/src/db/repositories/reconciliation-runs';
-import { findUserById } from '@/src/db/repositories/users';
+import { findUserById, updateUser } from '@/src/db/repositories/users';
 import { findImportById } from '@/src/db/repositories/imports';
 import { reconcileWbPayout, type WbPayoutResult } from '@/src/lib/reconciliation/wbPayout';
 import { enqueue } from '@/src/lib/jobs/queue';
 import { clearSession } from '@/src/lib/telegram/session';
-import { hasProFeatures, hasBusinessFeatures } from '@/src/lib/billing/tariffs';
+import { hasProFeatures, hasBusinessFeatures, monthlyLimitFor } from '@/src/lib/billing/tariffs';
+import { getDb } from '@/src/db';
+import { reconciliation_runs } from '@/src/db/schema';
+import { eq, and, gte, lte } from 'drizzle-orm';
 
 async function notifyUser(telegramId: bigint, text: string): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -148,6 +151,35 @@ export async function handleReconcile(job: Job): Promise<void> {
       loss_kopeks: lossKopeks,
       loss_percent: lossPercent,
     });
+
+    // Инкремент счётчика сверок – только при успешном завершении, с дедупликацией
+    if (user) {
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+
+      const db = getDb();
+      const existingCompleted = await db
+        .select({ id: reconciliation_runs.id })
+        .from(reconciliation_runs)
+        .where(
+          and(
+            eq(reconciliation_runs.user_id, user.id),
+            eq(reconciliation_runs.wb_import_id, run.wb_import_id),
+            eq(reconciliation_runs.bank_import_id, run.bank_import_id),
+            eq(reconciliation_runs.status, 'COMPLETED'),
+            gte(reconciliation_runs.created_at, startOfMonth),
+            lte(reconciliation_runs.created_at, endOfMonth)
+          )
+        )
+        .limit(1);
+
+      // Увеличиваем счётчик, только если нет другого успешного run с той же парой импортов в этом месяце
+      if (existingCompleted.length === 0) {
+        const used = user.monthly_reconciliations ?? 0;
+        await updateUser(user.id, { monthly_reconciliations: used + 1 });
+      }
+    }
 
     if (user?.telegram_id) {
       const now = new Date();
