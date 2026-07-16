@@ -214,7 +214,10 @@ function greedyMatch(
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export async function globalMatch(runId: string): Promise<MatchStats> {
+export async function globalMatch(
+  runId: string,
+  opts?: { dryRun?: boolean },
+): Promise<MatchStats> {
   const run = await findRunById(runId);
   if (!run) throw new Error(`Run not found: ${runId}`);
 
@@ -435,45 +438,46 @@ export async function globalMatch(runId: string): Promise<MatchStats> {
     }
   }
 
-  // ── Step 3: Persist matches ──────────────────────────────────────────────
+  // ── Step 3: Persist matches (skip if dryRun) ──────────────────────────────
 
   let persistedMatches: { id: string }[] = [];
-  if (matchRows.length > 0) {
+
+  if (!opts?.dryRun && matchRows.length > 0) {
     const CHUNK = 200;
     for (let i = 0; i < matchRows.length; i += CHUNK) {
       const chunk = await createMatches(matchRows.slice(i, i + CHUNK));
       persistedMatches.push(...chunk);
     }
-  }
 
-  // Insert match items with real match IDs
-  const allItems: NewReconciliationMatchItem[] = [];
-  for (const { matchIdx, items } of matchItemPairs) {
-    const matchId = persistedMatches[matchIdx]?.id;
-    if (!matchId) continue;
-    for (const item of items) {
-      allItems.push({ ...item, match_id: matchId });
+    // Insert match items with real match IDs
+    const allItems: NewReconciliationMatchItem[] = [];
+    for (const { matchIdx, items } of matchItemPairs) {
+      const matchId = persistedMatches[matchIdx]?.id;
+      if (!matchId) continue;
+      for (const item of items) {
+        allItems.push({ ...item, match_id: matchId });
+      }
     }
-  }
-  if (allItems.length > 0) {
-    const CHUNK = 500;
-    for (let i = 0; i < allItems.length; i += CHUNK) {
-      await createMatchItems(allItems.slice(i, i + CHUNK));
+    if (allItems.length > 0) {
+      const CHUNK_ITEMS = 500;
+      for (let i = 0; i < allItems.length; i += CHUNK_ITEMS) {
+        await createMatchItems(allItems.slice(i, i + CHUNK_ITEMS));
+      }
     }
-  }
 
-  // Store evidence for matched pairs
-  for (const { matchIdx, wbTx, bankTx, candidate } of evidenceQueue) {
-    const matchId = persistedMatches[matchIdx]?.id;
-    if (!matchId) continue;
+    // Store evidence for matched pairs
+    for (const { matchIdx, wbTx, bankTx, candidate } of evidenceQueue) {
+      const matchId = persistedMatches[matchIdx]?.id;
+      if (!matchId) continue;
 
-    const result = scoreCandidate(toTxFields(wbTx), toTxFields(bankTx), weights);
-    await storeEvidence({
-      matchId,
-      components: result.components,
-      penalties: result.penalties,
-      finalScore: candidate.score,
-    });
+      const result = scoreCandidate(toTxFields(wbTx), toTxFields(bankTx), weights);
+      await storeEvidence({
+        matchId,
+        components: result.components,
+        penalties: result.penalties,
+        finalScore: candidate.score,
+      });
+    }
   }
 
   // ── Step 4: Compute stats ────────────────────────────────────────────────
