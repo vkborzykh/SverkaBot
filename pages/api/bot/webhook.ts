@@ -551,10 +551,25 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
     const data = 'data' in cbq ? cbq.data : undefined;
     if (!data) return;
 
+    if (data.startsWith('summary_period_pick:')) {
+      const cabinetId = data.slice('summary_period_pick:'.length);
+      const { handleSummaryPeriodPick } = await import('@/src/lib/telegram/handlers/summaryExport');
+      await handleSummaryPeriodPick(ctx, cabinetId === 'all' ? undefined : cabinetId);
+      return;
+    }
+
     if (data.startsWith('summary_export:')) {
-      const cabinetId = data.slice('summary_export:'.length);
+      const rest = data.slice('summary_export:'.length);
+      const [cabinetIdPart, periodPart] = rest.split(':');
+      const cabinetId = cabinetIdPart === 'all' ? undefined : cabinetIdPart;
+      // Защита от произвольного значения периода в callback_data — падаем
+      // обратно на 'all', а не доверяем строке напрямую.
+      const validPeriods = ['week', 'month', 'prev_month', 'all'] as const;
+      const period = (validPeriods as readonly string[]).includes(periodPart)
+        ? (periodPart as (typeof validPeriods)[number])
+        : 'all';
       const { handleSummaryExport } = await import('@/src/lib/telegram/handlers/summaryExport');
-      await handleSummaryExport(ctx, cabinetId === 'all' ? undefined : cabinetId);
+      await handleSummaryExport(ctx, cabinetId, period);
       return;
     }
 
