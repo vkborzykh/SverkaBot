@@ -75,6 +75,21 @@ export async function GET(req: NextRequest) {
     loss: sorted.map(r => Number(r.loss_kopeks ?? 0) / 100),
   };
 
+  // ── Текстовая сводка ──────────────────────────────────────────────────────
+  const totalRuns = filtered.length;
+  const totalExpected = filtered.reduce((sum, r) => sum + Number(r.turnover_kopeks ?? 0), 0) / 100;
+  const totalReceived = filtered.reduce((sum, r) => sum + (Number(r.turnover_kopeks ?? 0) - Number(r.loss_kopeks ?? 0)), 0) / 100;
+  const totalLoss = filtered.reduce((sum, r) => sum + Number(r.loss_kopeks ?? 0), 0) / 100;
+  const avgLossPercent = totalExpected > 0 ? (totalLoss / totalExpected) * 100 : 0;
+
+  const summary = {
+    totalRuns,
+    totalExpected,
+    totalReceived,
+    totalLoss,
+    avgLossPercent: Math.round(avgLossPercent * 100) / 100, // округление до двух знаков
+  };
+
   // Список кабинетов для фильтра
   const cabinets = await findCabinetsByUserId(user.id);
   const cabinetList = cabinets.map(c => ({ id: c.id, name: c.name }));
@@ -82,6 +97,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     ok: true,
     chart: chartData,
+    summary,
     cabinets: cabinetList,
   }, {
     headers: {
