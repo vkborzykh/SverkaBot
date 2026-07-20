@@ -10,6 +10,7 @@ import { findCabinetById } from '@/src/db/repositories/wb-cabinets';
 import { findPrimaryReportByRunId, createReport } from '@/src/db/repositories/reports';
 import { storeReport } from '@/src/lib/ingestion/storage';
 import { buildHtmlReport, type ClaimRow, type ReportTxRow } from '@/src/lib/reports/htmlReport';
+import { buildRowLevelClaim } from '@/src/lib/reconciliation/claimBuilder';
 import { clearSession } from '@/src/lib/telegram/session';
 import { msg } from '@/src/lib/telegram/messages.ru';
 import { getReconciliationFinishedKeyboard } from '@/src/lib/telegram/keyboard';
@@ -142,21 +143,34 @@ export async function handleReportExport(job: Job): Promise<void> {
   const unidentifiedTotalKopeks = unidentified.reduce((s, t) => s + (t.amount_kopeks ?? BigInt(0)), BigInt(0));
   const unidentifiedRows = unidentified.slice(0, MAX_REPORT_ROWS).map(toRow);
 
-  const claimAmountKopeks = lossKopeks;
+  let claimAmountKopeks = lossKopeks;
   const wbTimes = wbTxs.map((t) => timeOf(t.transaction_date)).filter((n) => n > 0);
   const claimPeriod = wbTimes.length ? `${fmtDmy(new Date(Math.min(...wbTimes)))} – ${fmtDmy(new Date(Math.max(...wbTimes)))}` : fmtDmy(run.created_at);
-  const claimRows: ClaimRow[] = wbSorted.filter((tx) => ((tx.direction as string) ?? 'IN') !== 'OUT').slice(0, MAX_REPORT_ROWS).map((tx) => ({
-    dateStr: fmtDmy(tx.transaction_date),
-    amountKopeks: tx.amount_kopeks ?? BigInt(0),
-    reference: tx.reference,
-    description: tx.description,
-  }));
+
+  // Пытаемся построить построчную претензию (конкретные WB-строки без
+  // соответствующего поступления в банке). При низкой уверенности или
+  // отсутствии данных — откат на старый агрегатный список (все начисления
+  // WB за период, помечено соответствующей оговоркой в htmlReport.ts).
+  let claimRows: ClaimRow[];
+  let claimIsRowLevel = false;
+  const rowLevelClaim = await buildRowLevelClaim(runId, wbTxs, lossKopeks);
+  if (rowLevelClaim && rowLevelClaim.confidence === 'high' && rowLevelClaim.rows.length > 0) {
+    claimRows = rowLevelClaim.rows.slice(0, MAX_REPORT_ROWS);
+    claimAmountKopeks = rowLevelClaim.sumUnmatchedKopeks;
+    claimIsRowLevel = true;
+  } else {
+    claimRows = wbSorted.filter((tx) => ((tx.direction as string) ?? 'IN') !== 'OUT').slice(0, MAX_REPORT_ROWS).map((tx) => ({
+      dateStr: fmtDmy(tx.transaction_date),
+      amountKopeks: tx.amount_kopeks ?? BigInt(0),
+      reference: tx.reference,
+      description: tx.description,
+    }));
+  }
 
   const htmlReport = buildHtmlReport({
     runId,
     dateStr: fmtDmy(run.created_at),
     cabinetName,
-    exportCsvCommand: null,
     status: aggStatus,
     grossPayoutKopeks,
     commissionsKopeks,
@@ -175,6 +189,7 @@ export async function handleReportExport(job: Job): Promise<void> {
     claimAmountKopeks,
     claimPeriod,
     claimRows,
+    claimIsRowLevel,
   });
 
   const htmlBuffer = Buffer.from(htmlReport, 'utf-8');

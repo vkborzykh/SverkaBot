@@ -43,6 +43,7 @@ describe('subscription', () => {
       expect(mockUpdateUser).toHaveBeenCalledWith('user-1', {
         subscription_status: 'ACTIVE',
         subscription_end_date: expect.any(Date),
+        trial_expires_at: null,
       });
 
       const now = new Date();

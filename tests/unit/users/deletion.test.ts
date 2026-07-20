@@ -39,16 +39,18 @@ describe('deleteUserData', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFindUserById.mockResolvedValue(FAKE_USER);
-    // First call: imports query
-    // Second call: reports query
-    // Subsequent calls: delete/update operations
+    // Порядок db.execute() в реальной реализации (src/lib/users/deletion.ts):
+    // 1) imports query, 2) runCount query, 3) reports query, далее — deletes/updates.
     mockExecute
       .mockResolvedValueOnce([
         { id: 'imp-1', storage_path: 'imports/user-1/abc.xlsx' },
         { id: 'imp-2', storage_path: 'imports/user-1/def.csv' },
       ])
+      .mockResolvedValueOnce([{ c: 1 }]) // runCount
       .mockResolvedValueOnce([
-        { storage_path: 'reports/run-1/report.zip', run_id: 'run-1' },
+        // ZIP отчётов в продукте нет (HTML — первичный формат); реальный
+        // storage_path соответствует src/db/schema.ts / DB Draft.
+        { storage_path: 'reports/user-1/run-1/report.html', run_id: 'run-1' },
       ])
       .mockResolvedValue([]);
   });
@@ -68,14 +70,14 @@ describe('deleteUserData', () => {
   it('deletes report files and directories from storage', async () => {
     await deleteUserData('user-1');
 
-    expect(mockDeleteFile).toHaveBeenCalledWith('reports/run-1/report.zip');
+    expect(mockDeleteFile).toHaveBeenCalledWith('reports/user-1/run-1/report.html');
     expect(mockDeleteDirectory).toHaveBeenCalledWith('reports/run-1');
   });
 
   it('executes database operations in correct order', async () => {
     await deleteUserData('user-1');
 
-    // Total DB calls: 2 queries + multiple deletes/updates
+    // Total DB calls: imports + runCount + reports queries + multiple deletes/updates
     const calls = mockExecute.mock.calls;
     expect(calls.length).toBeGreaterThanOrEqual(8);
   });

@@ -23,7 +23,7 @@ import { sha256 } from '@/src/lib/ingestion/hash';
 import { getSetting } from '@/src/lib/settings/settings';
 import { msg } from '@/src/lib/telegram/messages.ru';
 import { bankCompletedKeyboard, replaceBankInlineKeyboard } from '@/src/lib/telegram/keyboard';
-import { detectHeader } from '@/src/lib/parsing/headerDetection';
+import { detectHeader, detectHeaderAndColumns } from '@/src/lib/parsing/headerDetection';
 import { detectDelimiter } from '@/src/lib/ingestion/validate';
 
 const PARSER_VERSION = 'bank_v2';
@@ -69,7 +69,7 @@ async function loadFileBuffer(storagePath: string): Promise<Buffer> {
 }
 
 function parseXlsxRaw(buffer: Buffer): string[][] {
-  const XLSX = require('xlsx');
+  const XLSX = require('xlsx') as typeof import('xlsx');
   const wb = XLSX.read(buffer, { type: 'buffer', cellDates: false });
   const sheet = wb.Sheets[wb.SheetNames[0]];
   if (!sheet) return [];
@@ -161,9 +161,28 @@ export async function handleParseBank(job: Job): Promise<void> {
   const cols = header.columns;
   const dataRows = rawRows.slice(header.headerRowIndex + 1).filter((r) => r.some((c) => c !== null && c !== ''));
 
-  // --- Профиль (сохраняем старую логику) ---
+  // --- Профиль ---
+  // Раньше здесь передавался пустой { columnMapping: {}, ... } — resolveProfile
+  // и createDraftProfile никогда не видели реальных имён колонок/дат/сумм и не
+  // могли ни правильно сматчить профиль банка, ни сохранить полезный черновик.
+  // detectHeaderAndColumns() уже умеет строить это из сырого файла — используем его.
   const signature = rawRows[header.headerRowIndex]?.map((c) => c?.toString() ?? '').join('|') ?? '';
-  const resolveResult = await resolveProfile({ columnMapping: {}, confidence: 0.5, dateFormat: '', amountFormat: '' as any, signature }, signature, imp.user_id);
+  const detection = await detectHeaderAndColumns(buffer, ext);
+  const detectionForProfile = detection ?? {
+    // Защитный откат: не должно происходить, если header.ok уже true выше,
+    // но detectHeaderAndColumns парсит буфер независимо — на случай расхождения
+    // логируем и продолжаем с минимальными данными вместо падения импорта.
+    headerRowIndex: header.headerRowIndex,
+    columnMapping: { dateColumn: '', amountColumn: '' },
+    dateFormat: 'DD.MM.YYYY',
+    amountFormat: 'comma',
+    confidence: 0.5,
+    signature,
+  };
+  if (!detection) {
+    console.warn(`[parseBank] detectHeaderAndColumns returned null despite detectHeader.ok=true for import ${importId}`);
+  }
+  const resolveResult = await resolveProfile(detectionForProfile, signature, imp.user_id);
 
   let activeProfileId: string;
   let profileConfidence: number;
@@ -177,7 +196,7 @@ export async function handleParseBank(job: Job): Promise<void> {
     const profile = await findProfileById(activeProfileId);
     profileDisplayName = profile?.display_name ?? 'Известный банк';
   } else {
-    activeProfileId = await createDraftProfile({ columnMapping: {}, confidence: 0.5, dateFormat: '', amountFormat: '' as any, signature }, signature, imp.user_id);
+    activeProfileId = await createDraftProfile(detectionForProfile, signature, imp.user_id);
     profileConfidence = 0.25;
     profileStatus = 'DRAFT';
   }

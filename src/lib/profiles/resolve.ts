@@ -1,6 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
-import { getDb } from '@/src/db/index';
-import { statement_profiles } from '@/src/db/schema';
+import { findMatchableProfiles } from '@/src/db/repositories/statement-profiles';
 import type { HeaderDetectionResult } from '@/src/lib/parsing/headerDetection';
 
 const MATCH_THRESHOLD = 0.7;
@@ -58,11 +56,7 @@ export async function resolveProfile(
   console.time('[resolveProfile] total');
 
   // Ищем ВСЕ профили (не только ACTIVE), чтобы не плодить черновики
-  const db = getDb();
-  const allProfiles = await db
-    .select()
-    .from(statement_profiles)
-    .where(sql`deleted_at IS NULL`);
+  const allProfiles = await findMatchableProfiles();
 
   if (allProfiles.length === 0) {
     console.timeEnd('[resolveProfile] total');

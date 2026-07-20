@@ -41,6 +41,9 @@ export interface HtmlReportData {
   claimAmountKopeks: bigint;
   claimPeriod: string;
   claimRows: ClaimRow[];
+  /** true — claimRows это конкретные непокрытые строки (высокая уверенность);
+   *  false/undefined — старое поведение, claimRows это все начисления WB за период. */
+  claimIsRowLevel?: boolean;
 }
 
 function rub(kopeks: bigint): string {
@@ -211,12 +214,16 @@ export function buildHtmlReport(data: HtmlReportData): string {
     const wrappedClaimTable = data.claimRows.length > 0
       ? wrapCollapsible(claimTableHtml, data.claimRows.length)
       : '';
+    const claimRowsNote = data.claimIsRowLevel
+      ? '<p class="muted">Ниже перечислены конкретные строки из отчёта WB, для которых мы не нашли соответствующего поступления в банковской выписке (сверка по сумме и дате). Это не окончательное решение — возможны платежи вне окна дат сверки.</p>'
+      : '<p class="muted">Не удалось построчно определить конкретные непоступившие платежи, поэтому ниже — все начисления WB за период. Сверьте их с банковской выпиской самостоятельно перед отправкой претензии.</p>';
     claimSection = `
     <h2>Данные для претензии</h2>
     <div class="claim-amt">Сумма к доплате: <b>${rub(data.claimAmountKopeks)}</b></div>
     <div class="tmpl"><div class="tmpl-h">Шаблон обращения – проверьте перед отправкой:</div><div class="tmpl-b">${esc(
       tmpl,
     )}</div></div>
+    ${claimRowsNote}
     ${wrappedClaimTable}
     <p class="disclaimer">Это шаблон, а не юридически выверенная претензия. Проверьте формулировки и цифры перед отправкой на маркетплейс.</p>`;
   } else {

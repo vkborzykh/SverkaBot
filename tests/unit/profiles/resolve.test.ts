@@ -5,12 +5,12 @@ import type { HeaderDetectionResult } from '@/src/lib/parsing/headerDetection';
 // ── Mock DB repository ────────────────────────────────────────────────────────
 
 vi.mock('@/src/db/repositories/statement-profiles', () => ({
-  findActiveProfiles: vi.fn(),
+  findMatchableProfiles: vi.fn(),
 }));
 
-import { findActiveProfiles } from '@/src/db/repositories/statement-profiles';
+import { findMatchableProfiles } from '@/src/db/repositories/statement-profiles';
 
-const mockedFindActiveProfiles = vi.mocked(findActiveProfiles);
+const mockedFindMatchableProfiles = vi.mocked(findMatchableProfiles);
 
 // ── Fixture detection result ──────────────────────────────────────────────────
 
@@ -37,14 +37,14 @@ describe('resolveProfile', () => {
   });
 
   it('returns DRAFT when no active profiles exist', async () => {
-    mockedFindActiveProfiles.mockResolvedValue([]);
+    mockedFindMatchableProfiles.mockResolvedValue([]);
     const result = await resolveProfile(sampleDetection, sampleDetection.signature, 'user-1');
     expect(result.status).toBe('DRAFT');
     expect(result.profileId).toBeNull();
   });
 
   it('returns MATCHED when signature is an exact match', async () => {
-    mockedFindActiveProfiles.mockResolvedValue([
+    mockedFindMatchableProfiles.mockResolvedValue([
       {
         id: 'profile-sber',
         profile_key: 'sberbank_v1',
@@ -66,7 +66,7 @@ describe('resolveProfile', () => {
   });
 
   it('returns DRAFT when signature similarity is below threshold', async () => {
-    mockedFindActiveProfiles.mockResolvedValue([
+    mockedFindMatchableProfiles.mockResolvedValue([
       {
         id: 'profile-other',
         profile_key: 'other_bank_v1',
@@ -88,7 +88,7 @@ describe('resolveProfile', () => {
   });
 
   it('picks the profile with the highest score among multiple candidates', async () => {
-    mockedFindActiveProfiles.mockResolvedValue([
+    mockedFindMatchableProfiles.mockResolvedValue([
       {
         id: 'profile-low',
         profile_key: 'low_v1',
@@ -121,7 +121,7 @@ describe('resolveProfile', () => {
   });
 
   it('confidence is between 0 and 1', async () => {
-    mockedFindActiveProfiles.mockResolvedValue([
+    mockedFindMatchableProfiles.mockResolvedValue([
       {
         id: 'profile-x',
         profile_key: 'x_v1',
@@ -139,5 +139,26 @@ describe('resolveProfile', () => {
     const result = await resolveProfile(sampleDetection, sampleDetection.signature, 'user-1');
     expect(result.confidence).toBeGreaterThanOrEqual(0);
     expect(result.confidence).toBeLessThanOrEqual(1);
+  });
+
+  it('matches against DRAFT profiles too, not only ACTIVE (avoids spawning duplicate drafts for the same unconfirmed bank template)', async () => {
+    mockedFindMatchableProfiles.mockResolvedValue([
+      {
+        id: 'profile-draft',
+        profile_key: 'draft_xxx',
+        display_name: 'Черновик: неизвестный банк',
+        status: 'DRAFT',
+        signature: sampleDetection.signature, // exact match
+        column_mapping: sampleDetection.columnMapping,
+        date_format: 'DD.MM.YYYY',
+        amount_format: 'space_comma',
+        usage_count: 0,
+        success_rate: null,
+      } as never,
+    ]);
+
+    const result = await resolveProfile(sampleDetection, sampleDetection.signature, 'user-1');
+    expect(result.status).toBe('MATCHED');
+    expect(result.profileId).toBe('profile-draft');
   });
 });

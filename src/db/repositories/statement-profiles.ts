@@ -48,6 +48,20 @@ export async function findActiveProfiles(): Promise<StatementProfile[]> {
     );
 }
 
+/**
+ * Все профили, кроме удалённых — включая DRAFT. Используется resolveProfile():
+ * матчинг идёт не только по ACTIVE, чтобы не плодить дубликаты черновиков для
+ * одного и того же ещё неподтверждённого банковского шаблона (см. комментарий
+ * в src/lib/profiles/resolve.ts).
+ */
+export async function findMatchableProfiles(): Promise<StatementProfile[]> {
+  const db = getDb();
+  return db
+    .select()
+    .from(statement_profiles)
+    .where(isNull(statement_profiles.deleted_at));
+}
+
 export async function createProfile(
   data: NewStatementProfile,
 ): Promise<StatementProfile> {

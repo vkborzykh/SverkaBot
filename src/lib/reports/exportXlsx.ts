@@ -19,6 +19,10 @@
 // - Формат ячейки «Разница» теперь двухцветный: зелёный для положительных,
 //   красный для отрицательных (условное форматирование по знаку).
 
+// - Лист «Претензия» добавляется только если есть непокрытые WB-строки с
+//   высокой уверенностью (сверено с агрегатом в claimBuilder.ts) — иначе
+//   лист не создаётся вовсе, чтобы не показывать недостоверную разбивку.
+
 import * as XLSX from 'xlsx';
 import {
   getRunAggregates,
@@ -27,6 +31,7 @@ import {
   applyRubNumberFormat,
   fmtDate,
 } from './runAggregates';
+import { buildRowLevelClaim } from '@/src/lib/reconciliation/claimBuilder';
 
 const RUB_FMT = '#,##0.00;[Red]-#,##0.00';
 const DIFF_FMT = '[Green]#,##0.00;[Red]-#,##0.00';
@@ -68,6 +73,36 @@ export async function buildXlsxForRun(runId: string): Promise<Buffer> {
   const diffCell = wsSummary[`B${rowOffset + 7}`];
   if (diffCell && diffCell.t === 'n') diffCell.z = DIFF_FMT;
   XLSX.utils.book_append_sheet(wb, wsSummary, 'Сводка');
+
+  // Лист «Претензия» — только если есть непокрытые WB-строки с высокой
+  // уверенностью (claimBuilder сверяет сумму с уже провалидированным
+  // агрегатом agg.diffKopeks; см. src/lib/reconciliation/claimBuilder.ts).
+  if (agg.diffKopeks > BigInt(0)) {
+    const claim = await buildRowLevelClaim(agg.runId, agg.wbTxs, agg.diffKopeks);
+    if (claim && claim.confidence === 'high' && claim.rows.length > 0) {
+      const claimHeader = ['Дата начисления', 'Референс/номер', 'Описание', 'Сумма, руб.'];
+      const claimRows: (string | number)[][] = claim.rows.map((r) => [
+        r.dateStr,
+        r.reference ?? '',
+        r.description ?? '',
+        toRubNumber(r.amountKopeks),
+      ]);
+      const claimTotalRow = ['', '', 'Итого не подтверждено', toRubNumber(claim.sumUnmatchedKopeks)];
+      const wsClaim = XLSX.utils.aoa_to_sheet([
+        ['Строки WB, для которых не найдено соответствующее поступление в банковской выписке'],
+        [''],
+        claimHeader,
+        ...claimRows,
+        [''],
+        claimTotalRow,
+      ]);
+      applyRubNumberFormat(wsClaim, ['D'], claimRows.length + 3);
+      const totalRowIdx = claimRows.length + 5; // 1 (заголовок листа) + 1 (пустая) + 1 (шапка таблицы) + N строк + 1 (пустая) + сама строка итога
+      const totalCell = wsClaim[`D${totalRowIdx}`];
+      if (totalCell && totalCell.t === 'n') totalCell.z = RUB_FMT;
+      XLSX.utils.book_append_sheet(wb, wsClaim, 'Претензия');
+    }
+  }
 
   // Лист 2: WB — исходные данные
   const wbHeader = ['Дата', 'Тип операции', 'Референс/номер', 'Описание', 'Сумма, руб.'];
