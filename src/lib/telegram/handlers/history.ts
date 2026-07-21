@@ -6,7 +6,7 @@ import { findImportById } from '@/src/db/repositories/imports';
 import { loadFile } from '@/src/lib/ingestion/storage';
 import { msg } from '@/src/lib/telegram/messages.ru';
 import { hasExportAccess } from '@/src/lib/billing/tariffs';
-import type { BotContext } from '@/src/lib/telegram/router';
+import type { Context as BotContext } from 'telegraf';
 
 function fmtDate(d: string | Date): string {
   const dt = new Date(d);

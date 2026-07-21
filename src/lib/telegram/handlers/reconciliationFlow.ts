@@ -1,6 +1,6 @@
 import type { Context } from 'telegraf';
 import { setSession, getSessionPayload, updateSessionPayload, clearSession } from '../session';
-import { newReconciliationKeyboard, uploadWbInlineKeyboard, wbCompletedKeyboard, bankCompletedKeyboard, reconciliationFinishedKeyboard } from '../keyboard';
+import { newReconciliationKeyboard, uploadWbInlineKeyboard, wbCompletedKeyboard, bankCompletedKeyboard } from '../keyboard';
 import { msg } from '../messages.ru';
 import { findUserByTelegramId, updateUser } from '@/src/db/repositories/users';
 import { checkAccess } from '@/src/lib/telegram/access';

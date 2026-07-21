@@ -16,7 +16,8 @@ export const marketplaceEnum = pgEnum('marketplace_enum', [
   'MEGAMARKET',
 ]);
 
-// ANALYZING kept as a historical artifact (not used by new code). CANCELLED added.
+// ANALYZING is actively set by parseWb.ts/parseBank.ts during processing
+// (alongside PARSING) — not a historical artifact. CANCELLED added.
 export const importStatusEnum = pgEnum('import_status_enum', [
   'RECEIVED',
   'ANALYZING',

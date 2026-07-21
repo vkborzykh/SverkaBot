@@ -38,10 +38,12 @@ function buildStatisticsLines(runs: any[], label?: string): string[] {
   let lossCount = 0;
 
   for (const run of runs) {
-    totalExpected += run.turnover_kopeks ?? BigInt(0);
-    totalReceived += (run.turnover_kopeks ?? BigInt(0)) - (run.loss_kopeks ?? BigInt(0));
-    totalLoss += run.loss_kopeks ?? BigInt(0);
-    if (run.loss_kopeks && BigInt(run.loss_kopeks) > BigInt(0)) {
+    const turnover = BigInt(run.turnover_kopeks ?? 0);
+    const loss = BigInt(run.loss_kopeks ?? 0);
+    totalExpected += turnover;
+    totalReceived += turnover - loss;
+    totalLoss += loss;
+    if (loss > BigInt(0)) {
       lossCount++;
     }
   }

@@ -6,6 +6,8 @@ export type SessionState =
   | 'awaiting_wb_file'
   | 'awaiting_bank_file'
   | 'awaiting_cabinet_name'
+  | 'awaiting_consent'
+  | 'choosing_cabinet'
   | 'reconciliation_active';   // новая операция сверки
 
 const SESSION_TTL_MINUTES = 30;

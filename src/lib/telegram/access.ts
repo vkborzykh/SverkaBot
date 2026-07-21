@@ -30,7 +30,9 @@ export function checkAccess(user: {
   trial_expires_at: Date | null;
   subscription_end_date: Date | null;
   telegram_id: bigint | null;
-}): AccessLevel {
+} | undefined): AccessLevel {
+  if (!user) return 'none';
+
   // Admins always have full access
   if (user.telegram_id && isAdmin(user.telegram_id)) {
     return 'full';

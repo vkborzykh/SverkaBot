@@ -47,9 +47,26 @@ export const msg = {
   uploadBankCompleted: '✅ Выписка обработана. Теперь можно запустить сверку.',
 
   // ── Reconciliation ─────────────────────────────────────────────────────────
-  syncStarted: 'Сверка запущена.',
-  syncCompleted: (expected: string, received: string): string =>
-    `✅ Сверка завершена. Ожидалось к выплате: ${expected}. Поступило от Wildberries: ${received}.`,
+  syncStarted: (runId: string): string =>
+    `Сверка запущена. Обычно занимает до минуты. Статус: /sync_status ${runId}`,
+  syncNoEligibleImports:
+    'Не найдено подходящих завершённых импортов для сверки. Загрузите отчёт WB и выписку банка.',
+  syncGenericError: 'Не удалось запустить сверку. Попробуйте ещё раз чуть позже.',
+  syncCompleted: (
+    matchedCount: number,
+    unmatchedCount: number,
+    ambiguousCount: number,
+    lossRub: string,
+    lossPercent: string | null,
+  ): string => {
+    let text = `✅ Сверка завершена. Совпадений: ${matchedCount}. Не найдено: ${unmatchedCount}. Неоднозначно: ${ambiguousCount}. Сумма неподтверждённых выплат: ${lossRub} ₽.`;
+    if (lossPercent !== null) {
+      text += `\nПроцент неподтверждённых выплат от оборота: ${lossPercent}%`;
+    }
+    return text;
+  },
+  syncStatusAmbiguousWarning: (ambiguousRub: string): string =>
+    `⚠️ Есть неоднозначные совпадения на сумму ${ambiguousRub} ₽ — рекомендуем проверить их в отчёте вручную.`,
   syncCompletedReconciled: 'Расхождений не найдено.',
   syncCompletedOverpaid: 'Поступило больше ожидаемого.',
   syncCompletedUnderpaid: 'Возможная недоплата.',

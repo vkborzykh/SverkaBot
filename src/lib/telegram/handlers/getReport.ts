@@ -6,7 +6,7 @@ import { enqueue } from '@/src/lib/jobs/queue';
 import { clearSession } from '@/src/lib/telegram/session';
 import { msg } from '@/src/lib/telegram/messages.ru';
 import { getReconciliationFinishedKeyboard } from '@/src/lib/telegram/keyboard';
-import type { BotContext } from '@/src/lib/telegram/router';
+import type { Context as BotContext } from 'telegraf';
 
 async function sendDocumentToUser(
   telegramId: bigint,
@@ -57,7 +57,7 @@ export async function handleGetReport(ctx: BotContext): Promise<void> {
   const from = ctx.from;
   if (!from) return;
 
-  const text = ctx.message?.text ?? '';
+  const text = (ctx.message && 'text' in ctx.message ? ctx.message.text : '') ?? '';
   const runId = text.trim().split(/\s+/)[1] ?? null;
   if (!runId) {
     await ctx.reply(msg.syncStatusMissingIdShort);

@@ -1,4 +1,4 @@
-import { eq, and, isNull, desc } from 'drizzle-orm';
+import { eq, and, isNull, desc, inArray } from 'drizzle-orm';
 import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
 import { getDb } from '../index';
 import { imports } from '../schema';
@@ -17,6 +17,21 @@ export async function findImportById(id: string): Promise<Import | undefined> {
     .where(and(eq(imports.id, id), isNull(imports.deleted_at)))
     .limit(1);
   return rows[0];
+}
+
+/**
+ * Batch fetch by id — used where callers previously ran findImportById in a
+ * loop (N+1 queries). Returns a Map for O(1) lookup by caller.
+ */
+export async function findImportsByIds(ids: string[]): Promise<Map<string, Import>> {
+  const uniqueIds = Array.from(new Set(ids));
+  if (uniqueIds.length === 0) return new Map();
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(imports)
+    .where(and(inArray(imports.id, uniqueIds), isNull(imports.deleted_at)));
+  return new Map(rows.map((r) => [r.id, r]));
 }
 
 export async function findImportsByUserId(

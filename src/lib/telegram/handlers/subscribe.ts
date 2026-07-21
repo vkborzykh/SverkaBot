@@ -165,7 +165,7 @@ async function sendInvoiceForPeriod(ctx: Context, userId: string, tariffKey: Tar
     prices: [{ label: t.label, amount: finalPrice }],
     need_email: true,
     send_email_to_provider: true,
-    provider_data: {
+    provider_data: JSON.stringify({
       receipt: {
         items: [{
           description: `Подписка SverkaBot ${t.label} ${periodLabel}`,
@@ -174,7 +174,7 @@ async function sendInvoiceForPeriod(ctx: Context, userId: string, tariffKey: Tar
           vat_code: 1,
         }],
       },
-    },
+    }),
   });
 }
 
@@ -188,7 +188,7 @@ async function sendExportAddonInvoice(ctx: Context, userId: string) {
     prices: [{ label: 'Экспорт для бухгалтера', amount: EXPORT_ADDON_PRICE_KOPEKS }],
     need_email: true,
     send_email_to_provider: true,
-    provider_data: {
+    provider_data: JSON.stringify({
       receipt: {
         items: [{
           description: 'Экспорт для бухгалтера',
@@ -197,7 +197,7 @@ async function sendExportAddonInvoice(ctx: Context, userId: string) {
           vat_code: 1,
         }],
       },
-    },
+    }),
   });
 }
 

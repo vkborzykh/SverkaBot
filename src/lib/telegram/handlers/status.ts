@@ -38,7 +38,6 @@ export async function handleStatus(ctx: BotContext): Promise<void> {
       break;
     case 'ANALYZING':
     case 'PARSING':
-    case 'RUNNING':
       await ctx.reply(msg.importStatusProcessing);
       break;
     case 'FAILED':

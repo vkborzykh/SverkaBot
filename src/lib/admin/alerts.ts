@@ -25,13 +25,14 @@ export async function alertAdmins(severity: string, title: string, message: stri
 }
 
 export async function alertWorkerFailure(
-  job: { job_type: string; id: string; entity_id: string | null },
+  job: { job_type: string | null; id: string; entity_id: string | null },
   error: string,
 ): Promise<void> {
+  const jobType = job.job_type ?? 'unknown';
   const trimmed = error.length > 500 ? error.slice(0, 500) + '…' : error;
   await alertAdmins(
     'error',
-    `Критическая ошибка в воркере: ${job.job_type}`,
-    `Задача: ${job.job_type}\nID: ${job.id}\nObject: ${job.entity_id ?? '—'}\nОшибка: ${trimmed}`,
+    `Критическая ошибка в воркере: ${jobType}`,
+    `Задача: ${jobType}\nID: ${job.id}\nObject: ${job.entity_id ?? '—'}\nОшибка: ${trimmed}`,
   );
 }

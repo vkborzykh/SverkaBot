@@ -32,12 +32,12 @@ export function getMainMenuKeyboard(
   subscriptionStatus?: string | null,
   trialExpiresAt?: Date | null,
 ) {
-  const secondRow = [msg.menuSubscribe];
+  const secondRow: string[] = [msg.menuSubscribe];
   if (hasProFeatures(userTariff, subscriptionStatus, trialExpiresAt)) {
     secondRow.push(msg.menuMyCabinets);
   }
 
-  const keyboard = [
+  const keyboard: string[][] = [
     [msg.menuNewReconciliation],
     secondRow,
     [msg.menuHelp, msg.menuHistory],

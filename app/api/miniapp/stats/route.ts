@@ -49,15 +49,9 @@ export async function GET(req: NextRequest) {
   if (cabinetId) {
     const cabinet = await findCabinetById(cabinetId);
     if (cabinet && cabinet.user_id === user.id) {
-      const { findImportById } = await import('@/src/db/repositories/imports');
-      const filteredRuns: typeof completed = [];
-      for (const run of completed) {
-        const wbImport = await findImportById(run.wb_import_id);
-        if ((wbImport as any)?.cabinet_id === cabinetId) {
-          filteredRuns.push(run);
-        }
-      }
-      filtered = filteredRuns;
+      const { findImportsByIds } = await import('@/src/db/repositories/imports');
+      const wbImportMap = await findImportsByIds(completed.map((r) => r.wb_import_id));
+      filtered = completed.filter((run) => (wbImportMap.get(run.wb_import_id) as any)?.cabinet_id === cabinetId);
     }
   }
 
@@ -143,11 +137,11 @@ export async function GET(req: NextRequest) {
       return `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}`;
     });
 
-    const { findImportById } = await import('@/src/db/repositories/imports');
+    const { findImportsByIds } = await import('@/src/db/repositories/imports');
+    const wbImportMap = await findImportsByIds(sortedAll.map((r) => r.wb_import_id));
     const runCabinetMap = new Map<string, string>();
     for (const run of sortedAll) {
-      const wbImport = await findImportById(run.wb_import_id);
-      const cabId = (wbImport as any)?.cabinet_id || null;
+      const cabId = (wbImportMap.get(run.wb_import_id) as any)?.cabinet_id || null;
       if (cabId) runCabinetMap.set(run.id, cabId);
     }
 
