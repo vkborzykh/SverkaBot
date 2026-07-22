@@ -6,7 +6,7 @@ import { okResponse, errResponse } from '@/src/lib/http';
 import { findUserByTelegramId, updateUser } from '@/src/db/repositories/users';
 import { drainQueue } from '@/src/lib/jobs/runner';
 import { runBackground } from '@/src/lib/jobs/background';
-import { getSession } from '@/src/lib/telegram/session';
+import { getSession, getSessionPayload } from '@/src/lib/telegram/session';
 import { msg } from '@/src/lib/telegram/messages.ru';
 import { getMainMenuKeyboard } from '@/src/lib/telegram/keyboard';
 import { checkAccess, PROTECTED_COMMANDS } from '@/src/lib/telegram/access';
@@ -30,7 +30,7 @@ function checkRateLimit(telegramId: bigint): boolean {
   rateLimitMap.set(key, recent);
   if (recent.length > RATE_LIMIT_MAX) {
     console.warn('[rate-limit] would block', { telegram_id: key, count: recent.length });
-    return true; // превышен, но на этом этапе только логируем
+    return true;
   }
   return false;
 }
@@ -63,7 +63,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const telegramId = from ? BigInt(from.id) : null;
 
     if (telegramId) {
-      // Rate limiting shadow mode (только логирование)
       checkRateLimit(telegramId);
 
       const db = getDb();
@@ -84,7 +83,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    // Маршрутизация команд и колбэков
     await routeTelegramUpdate(update);
 
   } catch (err) {
@@ -94,8 +92,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   runBackground(drainQueue());
   return res.status(200).json({ ok: true });
 }
-
-// ---------- Вспомогательные функции ----------
 
 function extractFrom(update: Update): TgUser | undefined {
   if ('message' in update && update.message && 'from' in update.message) {
@@ -442,7 +438,6 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
       return;
     }
 
-    // Явно извлекаем поля для checkAccess, чтобы избежать конфликта типов
     const access = checkAccess({
       subscription_status: user.subscription_status,
       trial_expires_at: user.trial_expires_at,
@@ -518,8 +513,6 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
     const sessionState = await getSession(telegramId);
     const docInfo = { fileId: doc.file_id, fileName: doc.file_name ?? 'file', fileSizeBytes: doc.file_size ?? 0 };
 
-    // Если пользователь уже начал сверку, но ещё не выбрал кабинет,
-    // напоминаем ему об этом и показываем список кабинетов.
     if (sessionState === 'choosing_cabinet') {
       const user = await findUserByTelegramId(telegramId);
       if (user) {
@@ -534,6 +527,20 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
         });
       } else {
         await ctx.reply(msg.cabinetMustBeSelected);
+      }
+      return;
+    }
+
+    // Подсказка: пользователь находится в процессе сверки, но не нажал кнопку загрузки
+    if (sessionState === 'reconciliation_active') {
+      const payload = (await getSessionPayload(telegramId)) ?? {};
+      if (!payload.wb_import_id) {
+        await ctx.reply(msg.uploadWbButtonHint);
+      } else if (!payload.bank_import_id) {
+        await ctx.reply(msg.uploadBankButtonHint);
+      } else {
+        // Оба файла уже загружены — кнопка «Запустить сверку» должна быть видна
+        await ctx.reply('Оба файла уже загружены. Нажмите «🔎 Запустить сверку», чтобы начать проверку.');
       }
       return;
     }
@@ -565,8 +572,6 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
       const rest = data.slice('summary_export:'.length);
       const [cabinetIdPart, periodPart] = rest.split(':');
       const cabinetId = cabinetIdPart === 'all' ? undefined : cabinetIdPart;
-      // Защита от произвольного значения периода в callback_data — падаем
-      // обратно на 'all', а не доверяем строке напрямую.
       const validPeriods = ['week', 'month', 'prev_month', 'all'] as const;
       const period = (validPeriods as readonly string[]).includes(periodPart)
         ? (periodPart as (typeof validPeriods)[number])
