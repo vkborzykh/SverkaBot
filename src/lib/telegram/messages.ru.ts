@@ -47,8 +47,7 @@ export const msg = {
   uploadBankCompleted: '✅ Выписка обработана. Теперь можно запустить сверку.',
 
   // ── Reconciliation ─────────────────────────────────────────────────────────
-  syncStarted: (runId: string): string =>
-    `Сверка запущена. Обычно занимает до минуты. Статус: /sync_status ${runId}`,
+  syncStarted: 'Сверка запущена. Обычно занимает до минуты. Статус: /sync_status {runId}',
   syncNoEligibleImports:
     'Не найдено подходящих завершённых импортов для сверки. Загрузите отчёт WB и выписку банка.',
   syncGenericError: 'Не удалось запустить сверку. Попробуйте ещё раз чуть позже.',
@@ -66,7 +65,7 @@ export const msg = {
     return text;
   },
   syncStatusAmbiguousWarning: (ambiguousRub: string): string =>
-    `⚠️ Есть неоднозначные совпадения на сумму ${ambiguousRub} ₽ — рекомендуем проверить их в отчёте вручную.`,
+    `⚠️ Есть неоднозначные совпадения на сумму ${ambiguousRub} ₽ – рекомендуем проверить их в отчёте вручную.`,
   syncCompletedReconciled: 'Расхождений не найдено.',
   syncCompletedOverpaid: 'Поступило больше ожидаемого.',
   syncCompletedUnderpaid: 'Возможная недоплата.',
@@ -171,6 +170,10 @@ export const msg = {
   uploadDuplicateBankWarning: 'Обратите внимание: эта выписка уже была загружена ранее.',
   uploadNoSession:
     'Чтобы загрузить файл, сначала нажмите «🆕 Начать новую сверку».',
+  uploadWbButtonHint:
+    'Чтобы загрузить файл, сначала нажмите «📊 Загрузить WB отчёт».',
+  uploadBankButtonHint:
+    'Чтобы загрузить файл, сначала нажмите «🏦 Загрузить выписку».',
   uploadError: 'Не удалось обработать файл. Попробуйте ещё раз.',
 
   // ── Error messages ──────────────────────────────────────────────────────────
