@@ -14,7 +14,7 @@ import { buildRowLevelClaim } from '@/src/lib/reconciliation/claimBuilder';
 import { clearSession } from '@/src/lib/telegram/session';
 import { msg } from '@/src/lib/telegram/messages.ru';
 import { getReconciliationFinishedKeyboard } from '@/src/lib/telegram/keyboard';
-import { reportRetentionDaysFor } from '@/src/lib/billing/tariffs';
+import { hasExportAccess, reportRetentionDaysFor } from '@/src/lib/billing/tariffs';
 
 const MAX_REPORT_ROWS = 500;
 
@@ -87,7 +87,8 @@ export async function handleReportExport(job: Job): Promise<void> {
   let commissionsKopeks = BigInt(0);
   let expectedKopeks = BigInt(0);
   let receivedKopeks = BigInt(0);
-  let aggStatus: 'reconciled' | 'underpaid' | 'missing' | 'overpaid' = 'reconciled';
+  type AggStatus = 'reconciled' | 'underpaid' | 'missing' | 'overpaid';
+  let aggStatus: AggStatus = 'reconciled';
   const matchedBankTxIds = new Set<string>();
   for (const match of matches) {
     const [ev, items] = await Promise.all([
@@ -103,7 +104,7 @@ export async function handleReportExport(job: Job): Promise<void> {
       commissionsKopeks = BigInt(String(pen.wb_out_kopeks ?? '0'));
       expectedKopeks = BigInt(String(pen.expected_net_kopeks ?? '0'));
       receivedKopeks = BigInt(String(pen.received_kopeks ?? '0'));
-      aggStatus = (pen.status as typeof aggStatus) ?? 'reconciled';
+      aggStatus = (pen.status as AggStatus) ?? 'reconciled';
     }
   }
   const lossKopeks = expectedKopeks - receivedKopeks > BigInt(0) ? expectedKopeks - receivedKopeks : BigInt(0);
@@ -219,6 +220,23 @@ export async function handleReportExport(job: Job): Promise<void> {
       );
     } catch (err) {
       console.error('[reportExport] failed to send report to user:', err);
+    }
+
+    // Кнопка «Выгрузить для бухгалтера» – отправляется только здесь, СРАЗУ ПОСЛЕ
+    // фактической доставки HTML-отчёта, а не в reconcile.ts (там report_export
+    // ещё не выполнялся, и порядок сообщений был бы гарантированно неверным).
+    if (
+      hasExportAccess(user) &&
+      aggStatus === 'underpaid' &&
+      lossKopeks > BigInt(0)
+    ) {
+      await sendMessageToUser(user.telegram_id, '📥 Хотите выгрузить эту сверку для бухгалтера?', {
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '📗 Выгрузить XLSX', callback_data: `export_xlsx:${runId}` },
+          ]],
+        },
+      });
     }
 
     await clearSession(user.telegram_id);
