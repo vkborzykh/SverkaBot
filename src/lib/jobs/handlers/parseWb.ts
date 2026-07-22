@@ -288,7 +288,8 @@ export async function handleParseWb(job: Job): Promise<void> {
 
     const components: { amount: bigint; direction: 'IN' | 'OUT'; kind: string }[] = [];
     const rawPayout = row[colMap.amountCol];
-    if (rawPayout !== null && rawPayout !== undefined && String(rawPayout).trim() !== '') {
+    const hasOwnPayout = rawPayout !== null && rawPayout !== undefined && String(rawPayout).trim() !== '';
+    if (hasOwnPayout) {
       try {
         const p = normalizeAmount(rawPayout);
         if (p !== BigInt(0)) {
@@ -300,18 +301,32 @@ export async function handleParseWb(job: Job): Promise<void> {
       }
     }
 
-    // Добавляем транзакции удержаний из специализированных колонок
-    for (const dcol of colMap.deductionCols) {
-      const rawVal = row[dcol.index];
-      if (rawVal !== null && rawVal !== undefined && String(rawVal).trim() !== '') {
-        try {
-          const amt = normalizeAmount(rawVal);
-          // Удержания обычно положительные в отчёте, но мы трактуем их как OUT
-          if (amt > BigInt(0)) {
-            components.push({ amount: amt, direction: 'OUT', kind: dcol.category.toLowerCase() });
+    // Добавляем транзакции удержаний из специализированных колонок — но ТОЛЬКО
+    // если на этой же строке нет своего «К перечислению» (col33). В реальных
+    // отчётах WB логистика/штраф/хранение, указанные РЯДОМ с уже заполненным
+    // «К перечислению» на той же строке, УЖЕ вычтены из этой суммы — отдельная
+    // строка добавляется в отчёт только как разбивка структуры удержания для
+    // конкретной продажи, а не как отдельное списание. Прибавлять её ещё раз
+    // как отдельную OUT-транзакцию означает вычесть удержание дважды и
+    // занижает expectedNet — именно это давало ложный "Поступило больше
+    // ожидаемого" на реальных файлах (проверено численно на 5 тестовых
+    // отчётах: расхождение 2200–3700 ₽ на файл).
+    // Отдельные строки-документы без своего «К перечислению» (тип документа
+    // «Хранение», «Штраф», «Удержания» и т.п.) — это самостоятельные списания,
+    // которые больше нигде не учтены, поэтому для них поведение не меняется.
+    if (!hasOwnPayout) {
+      for (const dcol of colMap.deductionCols) {
+        const rawVal = row[dcol.index];
+        if (rawVal !== null && rawVal !== undefined && String(rawVal).trim() !== '') {
+          try {
+            const amt = normalizeAmount(rawVal);
+            // Удержания обычно положительные в отчёте, но мы трактуем их как OUT
+            if (amt > BigInt(0)) {
+              components.push({ amount: amt, direction: 'OUT', kind: dcol.category.toLowerCase() });
+            }
+          } catch (e) {
+            // Не критично, просто пропускаем
           }
-        } catch (e) {
-          // Не критично, просто пропускаем
         }
       }
     }
