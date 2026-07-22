@@ -5,7 +5,7 @@ import { findImportById } from '@/src/db/repositories/imports';
 import { reconcileWbPayout, type WbPayoutResult } from '@/src/lib/reconciliation/wbPayout';
 import { enqueue } from '@/src/lib/jobs/queue';
 import { clearSession } from '@/src/lib/telegram/session';
-import { hasProFeatures, hasBusinessFeatures, hasExportAccess, monthlyLimitFor } from '@/src/lib/billing/tariffs';
+import { hasProFeatures, hasBusinessFeatures, monthlyLimitFor } from '@/src/lib/billing/tariffs';
 import { getDb } from '@/src/db';
 import { reconciliation_runs, canonical_transactions } from '@/src/db/schema';
 import { eq, and, gte, lte, sql, ne } from 'drizzle-orm';
@@ -413,18 +413,9 @@ export async function handleReconcile(job: Job): Promise<void> {
           await notifyUser(user.telegram_id, forecastMsg);
         }
 
-        // Кнопка «Выгрузить для бухгалтера» прямо в чате после недоплаты
-        if (
-          hasExportAccess(user) &&
-          result.status === 'underpaid' &&
-          result.discrepancyKopeks > BigInt(0)
-        ) {
-          await notifyUser(user.telegram_id, '📥 Хотите выгрузить эту сверку для бухгалтера?', {
-            inline_keyboard: [[
-              { text: '📗 Выгрузить XLSX', callback_data: `export_xlsx:${runId}` },
-            ]],
-          });
-        }
+        // Кнопка «Выгрузить для бухгалтера» перенесена в reportExport.ts:
+        // она должна прийти только после того, как реально отправлен HTML-отчёт,
+        // а не внутри этого job'а (report_export ещё даже не начал выполняться в этот момент).
 
         // Контекстный апсейл для Старта при недоплате
         if (
