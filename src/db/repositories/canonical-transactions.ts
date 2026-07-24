@@ -1,4 +1,4 @@
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
 import { getDb } from '../index';
 import { canonical_transactions } from '../schema';
@@ -31,6 +31,19 @@ export async function findTransactionsByImportId(
     .from(canonical_transactions)
     .where(eq(canonical_transactions.import_id, importId))
     .orderBy(canonical_transactions.row_number);
+}
+
+// Возвращает только количество строк, не загружая сами транзакции
+// (в т.ч. потенциально большое поле raw_payload JSONB) в память.
+export async function countTransactionsByImportId(
+  importId: string,
+): Promise<number> {
+  const db = getDb();
+  const rows = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(canonical_transactions)
+    .where(eq(canonical_transactions.import_id, importId));
+  return rows[0]?.count ?? 0;
 }
 
 export async function createTransactions(
