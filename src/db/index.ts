@@ -10,7 +10,17 @@ export function getDb() {
     const connectionString = process.env.DATABASE_URL;
     if (!connectionString) throw new Error('DATABASE_URL is not set');
     // prepare: false required for Supabase transaction pooler (port 6543).
-    const client = postgres(connectionString, { prepare: false });
+    // max: 1 — на serverless каждый инстанс функции держит свой пул; Supabase
+    // сама рекомендует 1 соединение на инстанс для transaction pooler, иначе
+    // при параллельных вызовах Vercel быстро исчерпывает лимит пулера.
+    // connect_timeout/idle_timeout — чтобы зависшее соединение к пулеру
+    // падало с понятной ошибкой за секунды, а не висело до тайм-аута Vercel.
+    const client = postgres(connectionString, {
+      prepare: false,
+      max: 1,
+      connect_timeout: 10,
+      idle_timeout: 20,
+    });
     _db = drizzle(client, { schema });
   }
   return _db;
