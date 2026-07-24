@@ -1,3 +1,4 @@
+// pages/api/bot/webhook.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 import type { Update, User as TgUser } from 'telegraf/types';
 import { requireTelegramSecret } from '@/src/lib/guards';
@@ -15,13 +16,10 @@ import { getDb } from '@/src/db';
 import { users } from '@/src/db/schema';
 import { eq, sql, and, or, isNull, lt } from 'drizzle-orm';
 
-// Без этого Vercel обрезает выполнение функции по дефолтному лимиту платформы.
-// runBackground(drainQueue()) в конце хендлера должен успеть обработать не только
-// reconcile-job (быстрые sendMessage), но и следующий за ним report_export-job
-// (несколько запросов в БД + сборка HTML + sendDocument) – без явного увеличения
-// maxDuration это часто не укладывается в дефолтный тайм-аут, и отчёт с кнопкой
-// «Выгрузить XLSX» обрезаются до отправки.
 export const config = {
+  api: {
+    bodyParser: true,
+  },
   maxDuration: 60,
 };
 
@@ -39,7 +37,7 @@ function checkRateLimit(telegramId: bigint): boolean {
   rateLimitMap.set(key, recent);
   if (recent.length > RATE_LIMIT_MAX) {
     console.warn('[rate-limit] would block', { telegram_id: key, count: recent.length });
-    return true; // превышен, но на этом этапе только логируем
+    return true;
   }
   return false;
 }
@@ -72,7 +70,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const telegramId = from ? BigInt(from.id) : null;
 
     if (telegramId) {
-      // Rate limiting shadow mode (только логирование)
       checkRateLimit(telegramId);
 
       const db = getDb();
@@ -93,7 +90,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    // Маршрутизация команд и колбэков
     await routeTelegramUpdate(update);
 
   } catch (err) {
@@ -103,8 +99,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   runBackground(drainQueue());
   return res.status(200).json({ ok: true });
 }
-
-// ---------- Вспомогательные функции ----------
 
 function extractFrom(update: Update): TgUser | undefined {
   if ('message' in update && update.message && 'from' in update.message) {
@@ -451,7 +445,6 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
       return;
     }
 
-    // Явно извлекаем поля для checkAccess, чтобы избежать конфликта типов
     const access = checkAccess({
       subscription_status: user.subscription_status,
       trial_expires_at: user.trial_expires_at,
@@ -527,8 +520,6 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
     const sessionState = await getSession(telegramId);
     const docInfo = { fileId: doc.file_id, fileName: doc.file_name ?? 'file', fileSizeBytes: doc.file_size ?? 0 };
 
-    // Если пользователь уже начал сверку, но ещё не выбрал кабинет,
-    // напоминаем ему об этом и показываем список кабинетов.
     if (sessionState === 'choosing_cabinet') {
       const user = await findUserByTelegramId(telegramId);
       if (user) {
@@ -547,15 +538,15 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
       return;
     }
 
-    // Подсказки для процесса загрузки файлов
+    // Подсказка: пользователь находится в процессе сверки, но не нажал кнопку загрузки
     if (sessionState === 'reconciliation_active') {
-      const payload = await getSessionPayload(telegramId) ?? {};
+      const payload = (await getSessionPayload(telegramId)) ?? {};
       if (!payload.wb_import_id) {
         await ctx.reply(msg.uploadWbButtonHint);
       } else if (!payload.bank_import_id) {
         await ctx.reply(msg.uploadBankButtonHint);
       } else {
-        // Оба файла уже загружены
+        // Оба файла уже загружены — кнопка «Запустить сверку» должна быть видна
         await ctx.reply('Оба файла уже загружены. Нажмите «🔎 Запустить сверку», чтобы начать проверку.');
       }
       return;
@@ -588,8 +579,6 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
       const rest = data.slice('summary_export:'.length);
       const [cabinetIdPart, periodPart] = rest.split(':');
       const cabinetId = cabinetIdPart === 'all' ? undefined : cabinetIdPart;
-      // Защита от произвольного значения периода в callback_data — падаем
-      // обратно на 'all', а не доверяем строке напрямую.
       const validPeriods = ['week', 'month', 'prev_month', 'all'] as const;
       const period = (validPeriods as readonly string[]).includes(periodPart)
         ? (periodPart as (typeof validPeriods)[number])
