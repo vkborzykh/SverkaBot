@@ -4,6 +4,11 @@
   "devCommand": "npm run dev",
   "installCommand": "npm install",
   "framework": "nextjs",
+  "functions": {
+    "pages/api/bot/webhook.ts": {
+      "maxDuration": 60
+    }
+  },
   "crons": [
     { "path": "/api/jobs/daily", "schedule": "0 6 * * *" },
     { "path": "/api/jobs/weekly", "schedule": "0 6 * * 2" },
