@@ -1,4 +1,3 @@
-// pages/api/bot/webhook.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 import type { Update, User as TgUser } from 'telegraf/types';
 import { requireTelegramSecret } from '@/src/lib/guards';
@@ -6,7 +5,7 @@ import { okResponse, errResponse } from '@/src/lib/http';
 import { findUserByTelegramId, updateUser } from '@/src/db/repositories/users';
 import { drainQueue } from '@/src/lib/jobs/runner';
 import { runBackground } from '@/src/lib/jobs/background';
-import { getSession } from '@/src/lib/telegram/session';
+import { getSession, getSessionPayload } from '@/src/lib/telegram/session';
 import { msg } from '@/src/lib/telegram/messages.ru';
 import { getMainMenuKeyboard } from '@/src/lib/telegram/keyboard';
 import { checkAccess, PROTECTED_COMMANDS } from '@/src/lib/telegram/access';
@@ -544,6 +543,20 @@ async function routeTelegramUpdate(update: Update): Promise<void> {
         });
       } else {
         await ctx.reply(msg.cabinetMustBeSelected);
+      }
+      return;
+    }
+
+    // Подсказки для процесса загрузки файлов
+    if (sessionState === 'reconciliation_active') {
+      const payload = await getSessionPayload(telegramId) ?? {};
+      if (!payload.wb_import_id) {
+        await ctx.reply(msg.uploadWbButtonHint);
+      } else if (!payload.bank_import_id) {
+        await ctx.reply(msg.uploadBankButtonHint);
+      } else {
+        // Оба файла уже загружены
+        await ctx.reply('Оба файла уже загружены. Нажмите «🔎 Запустить сверку», чтобы начать проверку.');
       }
       return;
     }
