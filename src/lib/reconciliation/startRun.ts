@@ -3,7 +3,7 @@ import { findImportsByUserId, findImportById } from '@/src/db/repositories/impor
 import { createRun } from '@/src/db/repositories/reconciliation-runs';
 import { checkAccess } from '@/src/lib/telegram/access';
 import { getSetting } from '@/src/lib/settings/settings';
-import { findTransactionsByImportId } from '@/src/db/repositories/canonical-transactions';
+import { countTransactionsByImportId } from '@/src/db/repositories/canonical-transactions';
 
 const DATE_OVERLAP_DAYS = 31;
 
@@ -108,9 +108,16 @@ export async function startReconciliation(params: StartRunParams): Promise<Start
     }
   }
 
-  const [wbTxs, bankTxs] = await Promise.all([
-    findTransactionsByImportId(wbImportId!),
-    findTransactionsByImportId(bankImportId!),
+  // Здесь нужно только количество строк (для total_wb_rows/total_bank_rows),
+  // поэтому используем COUNT(*), а не загрузку всех транзакций целиком —
+  // ранее это тянуло в память все колонки, включая raw_payload JSONB,
+  // для каждой строки WB- и банковского импорта (до 50k+50k строк),
+  // что приводило к росту кучи Node до нескольких ГБ и падению процесса
+  // по "JavaScript heap out of memory" ещё до постановки job'а reconcile
+  // в очередь.
+  const [wbRowCount, bankRowCount] = await Promise.all([
+    countTransactionsByImportId(wbImportId!),
+    countTransactionsByImportId(bankImportId!),
   ]);
 
   console.log('[startReconciliation] Creating run...');
@@ -119,8 +126,8 @@ export async function startReconciliation(params: StartRunParams): Promise<Start
     wb_import_id: wbImportId!,
     bank_import_id: bankImportId!,
     status: 'PENDING',
-    total_wb_rows: wbTxs.length,
-    total_bank_rows: bankTxs.length,
+    total_wb_rows: wbRowCount,
+    total_bank_rows: bankRowCount,
     started_at: new Date(),
   });
 
